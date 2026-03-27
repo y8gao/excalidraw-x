@@ -1,5 +1,4 @@
 import { Excalidraw } from '@excalidraw/excalidraw'
-import '@excalidraw/excalidraw/index.css'
 import React from 'react'
 
 

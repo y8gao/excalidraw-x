@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 
@@ -8,7 +9,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'build'),
     filename: 'bundle.js',
-    publicPath: '/',
+    publicPath: './',
     clean: true,
   },
   devServer: {
@@ -16,9 +17,15 @@ module.exports = {
     hot: true,
     historyApiFallback: true,
     compress: true,
-    static: {
-      directory: path.resolve(__dirname, 'public'),
-    },
+    static: [
+      {
+        directory: path.resolve(__dirname, 'public'),
+      },
+      {
+        directory: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'excalidraw-assets-dev'),
+        publicPath: '/excalidraw-assets-dev',
+      },
+    ],
     client: {
       overlay: {
         errors: true,
@@ -54,16 +61,21 @@ module.exports = {
     ],
   },
   plugins: [
+    new webpack.DefinePlugin({
+      'process.env': JSON.stringify(process.env),
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
+    }),
     new HtmlWebpackPlugin({
       template: './index.html',
       filename: 'index.html',
       inject: 'body',
     }),
+    // Copy excalidraw assets to build folder for production
     new CopyPlugin({
       patterns: [
         {
-          from: path.resolve(__dirname, 'public', 'fonts'),
-          to: path.resolve(__dirname, 'build', 'fonts'),
+          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'excalidraw-assets-dev'),
+          to: path.resolve(__dirname, 'build', 'excalidraw-assets-dev'),
         },
       ],
     }),
@@ -71,7 +83,6 @@ module.exports = {
   resolve: {
     extensions: ['.js', '.jsx', '.css'],
     modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
-    conditionNames: ['import', 'module', 'production', 'browser'],
     alias: {
       'roughjs/bin/rough': path.resolve(__dirname, 'node_modules/roughjs/bin/rough.js'),
       'roughjs/bin/generator': path.resolve(__dirname, 'node_modules/roughjs/bin/generator.js'),

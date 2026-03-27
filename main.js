@@ -1,5 +1,11 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const isDev = require('electron-is-dev');
+
+// Handle Squirrel events for Windows installer (must be at the very top)
+if (require('electron-squirrel-startup')) {
+  app.quit();
+}
 
 let mainWindow;
 
@@ -11,20 +17,23 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      // Allow loading content with lenient MIME checking for CDN resources
       webSecurity: true,
     },
   });
 
-  // Load from webpack dev server during development, or built file in production
-  const isDev = require('electron-is-dev');
+  // Determine the app URL based on environment
   const appUrl = isDev
     ? 'http://localhost:3000'
-    : `file://${path.join(__dirname, 'build', 'index.html')}`;
-  mainWindow.loadURL(appUrl);
-  mainWindow.webContents.openDevTools();
+    : `file://${path.join(__dirname, 'build/index.html')}`;
 
-  // Handle any security warnings
+  mainWindow.loadURL(appUrl);
+
+  // Only open DevTools in development
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+
+  // Toggle DevTools with Ctrl+Shift+I
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.control && input.shift && input.keyCode === 105) {
       mainWindow.webContents.toggleDevTools();
@@ -50,9 +59,8 @@ app.on('activate', () => {
   }
 });
 
-// Handle any uncaught exceptions
+// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
 });
-
 
