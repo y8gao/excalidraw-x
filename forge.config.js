@@ -3,7 +3,7 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 
 module.exports = {
   packagerConfig: {
-    name: 'excalidraw-x',
+    name: 'ExcalidrawX',
     asar: true,
     icon: undefined, // TODO: Add icon path when available
     // Explicit ignore rules (overrides .gitignore so 'build/' is included)
@@ -38,7 +38,7 @@ module.exports = {
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        name: 'excalidraw-x',
+        name: 'ExcalidrawX',
         // Installer icon
         // iconUrl: 'https://example.com/icon.ico',
         // Setup icon

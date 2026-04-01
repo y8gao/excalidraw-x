@@ -3,13 +3,15 @@ const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 
-module.exports = {
-  mode: 'development',
+module.exports = (env, argv) => {
+  const isProd = argv && argv.mode === 'production';
+  return {
+  mode: isProd ? 'production' : 'development',
   entry: './src/index.jsx',
   output: {
     path: path.resolve(__dirname, 'build'),
     filename: 'bundle.js',
-    publicPath: './',
+    publicPath: isProd ? './' : '/',
     clean: true,
   },
   devServer: {
@@ -22,8 +24,9 @@ module.exports = {
         directory: path.resolve(__dirname, 'public'),
       },
       {
-        directory: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'excalidraw-assets-dev'),
-        publicPath: '/excalidraw-assets-dev',
+        // Serve all Excalidraw dev assets (fonts, locales, workers) at root
+        directory: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'dev'),
+        publicPath: '/',
       },
     ],
     client: {
@@ -74,8 +77,20 @@ module.exports = {
     new CopyPlugin({
       patterns: [
         {
-          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'excalidraw-assets-dev'),
-          to: path.resolve(__dirname, 'build', 'excalidraw-assets-dev'),
+          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', isProd ? 'prod' : 'dev', 'fonts'),
+          to: path.resolve(__dirname, 'build', 'fonts'),
+        },
+        {
+          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', isProd ? 'prod' : 'dev', 'locales'),
+          to: path.resolve(__dirname, 'build', 'locales'),
+        },
+        {
+          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', isProd ? 'prod' : 'dev', 'subset-worker.chunk.js'),
+          to: path.resolve(__dirname, 'build', 'subset-worker.chunk.js'),
+        },
+        {
+          from: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', isProd ? 'prod' : 'dev', 'subset-shared.chunk.js'),
+          to: path.resolve(__dirname, 'build', 'subset-shared.chunk.js'),
         },
       ],
     }),
@@ -98,4 +113,5 @@ module.exports = {
     maxEntrypointSize: 512000,
     maxAssetSize: 512000,
   },
+  };
 };
