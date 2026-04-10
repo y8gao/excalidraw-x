@@ -1,5 +1,9 @@
 name: CI
 
+# Must match `packagerConfig.name` in forge.config.js (Forge ZIP / app bundle name).
+env:
+  PACKAGE_ARTIFACT_PREFIX: ExcalidrawX
+
 on:
   push:
     branches: [main, master]
@@ -37,7 +41,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            make_cmd: npm run make
+          - os: windows-latest
+            make_cmd: npm run make
+          # Apple Silicon (host arch on macos-latest)
+          - os: macos-latest
+            make_cmd: npm run make
+          # Intel Mac — Forge targets x64 from the arm64 runner
+          - os: macos-latest
+            make_cmd: npm run make:mac-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -52,12 +66,33 @@ jobs:
         run: npm ci
 
       - name: Make distributables (ZIP)
-        run: npm run make
+        run: ${{ matrix.make_cmd }}
+
+      # Artifact name = Forge ZIP basename (no .zip), e.g. ExcalidrawX-darwin-arm64-0.1.2 — matches packager output.
+      - name: Locate Forge-built ZIP
+        id: forge_zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t zips < <(find out/make -type f -name '*.zip' | sort)
+          n=${#zips[@]}
+          if [[ "$n" -eq 0 ]]; then
+            echo '::error::No .zip found under out/make'
+            exit 1
+          fi
+          if [[ "$n" -gt 1 ]]; then
+            echo '::error::Expected exactly one .zip under out/make, found:' "${zips[*]}"
+            exit 1
+          fi
+          zip="${zips[0]}"
+          stem=$(basename "$zip" .zip)
+          echo "path=$zip" >> "$GITHUB_OUTPUT"
+          echo "stem=$stem" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: excalidraw-x-${{ github.ref_name }}-${{ matrix.os }}
-          path: out/make
+          name: ${{ steps.forge_zip.outputs.stem }}
+          path: ${{ steps.forge_zip.outputs.path }}
           if-no-files-found: error
 
   # Attach ZIPs from all matrix legs to a GitHub Release for the tag (public download).
@@ -72,7 +107,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          pattern: excalidraw-x-${{ github.ref_name }}-*
+          # Same stem as Forge ZIPs (version from package.json at tag), not the git tag string.
+          pattern: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-*
           merge-multiple: true
 
       - name: Upload release assets

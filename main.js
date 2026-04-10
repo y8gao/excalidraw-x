@@ -333,15 +333,26 @@ const buildMenu = () => {
   }
 };
 
+const resolveWindowIcon = () => {
+  if (process.platform === 'win32') {
+    const p = path.join(__dirname, 'assets', 'icon.ico');
+    return fs.existsSync(p) ? p : undefined;
+  }
+  if (process.platform === 'linux') {
+    const p = path.join(__dirname, 'assets', 'icon.png');
+    return fs.existsSync(p) ? p : undefined;
+  }
+  return undefined;
+};
+
 const createWindow = async () => {
-  const winIcon =
-    process.platform === 'win32' ? path.join(__dirname, 'assets', 'icon.ico') : undefined;
+  const winIcon = resolveWindowIcon();
 
   mainWindow = new BrowserWindow({
     title: 'ExcalidrawX',
     width: 1400,
     height: 900,
-    ...(winIcon && fs.existsSync(winIcon) ? { icon: winIcon } : {}),
+    ...(winIcon ? { icon: winIcon } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,

@@ -14,7 +14,8 @@
     "prod": "electron .",
     "package": "npm run build && electron-forge package",
     "make": "npm run build && electron-forge make",
-    "make:win": "npm run build && electron-forge make --platform win32 --arch x64"
+    "make:win": "npm run build && electron-forge make --platform win32 --arch x64",
+    "make:mac-x64": "npm run build && electron-forge make --platform darwin --arch x64"
   },
   "keywords": [],
   "author": "Yang Gao <yang.xz.gao@outlook.com>",
