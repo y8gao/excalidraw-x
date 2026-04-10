@@ -1,5 +1,7 @@
 # ExcalidrawX
 
+[![CI](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml)
+
 **ExcalidrawX** is a desktop application that wraps [Excalidraw](https://excalidraw.com/) in [Electron](https://www.electronjs.org/). You get the same infinite canvas, shapes, collaboration-oriented workflow, and library as the web app, but with a **native menu bar**, **real file paths**, **offline-friendly bundling**, and **OS-integrated** behavior suited to daily use on Windows, macOS, or Linux.
 
 Excalidraw itself is an open-source virtual whiteboard. This repository only adds the **desktop shell and integrations** described below; all drawing features come from `@excalidraw/excalidraw`.
