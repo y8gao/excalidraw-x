@@ -29,6 +29,10 @@ module.exports = (env, argv) => {
         directory: path.resolve(__dirname, 'public'),
       },
       {
+        directory: path.resolve(__dirname, 'assets'),
+        publicPath: '/',
+      },
+      {
         // Serve all Excalidraw dev assets (fonts, locales, workers) at root
         directory: path.resolve(__dirname, 'node_modules', '@excalidraw', 'excalidraw', 'dist', 'dev'),
         publicPath: '/',

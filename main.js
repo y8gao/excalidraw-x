@@ -107,7 +107,7 @@ const buildMenu = () => {
         { type: 'separator' },
         { label: 'Export Image...', accelerator: 'CmdOrCtrl+Shift+E', click: send('export-image') },
         { type: 'separator' },
-        { label: 'Exit', click: () => app.quit() },
+        { role: 'quit' },
       ],
     },
     {
@@ -330,6 +330,10 @@ const resolveWindowIcon = () => {
     const p = path.join(__dirname, 'assets', 'icon.ico');
     return fs.existsSync(p) ? p : undefined;
   }
+  if (process.platform === 'darwin') {
+    const p = path.join(__dirname, 'assets', 'icon.icns');
+    return fs.existsSync(p) ? p : undefined;
+  }
   if (process.platform === 'linux') {
     const p = path.join(__dirname, 'assets', 'icon.png');
     return fs.existsSync(p) ? p : undefined;
@@ -527,6 +531,14 @@ app.on('ready', () => {
   loadRecentFiles();
   buildMenu();
   createWindow();
+
+  // Set dock icon on macOS for development
+  if (process.platform === 'darwin') {
+    const iconPath = path.join(__dirname, 'assets', 'icon.icns');
+    if (fs.existsSync(iconPath)) {
+      app.dock.setIcon(iconPath);
+    }
+  }
 
   // When OS theme changes and appearance is set to Auto, push the new theme to the renderer
   nativeTheme.on('updated', () => {
