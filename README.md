@@ -21,8 +21,8 @@ Excalidraw itself is an open-source virtual whiteboard. This repository only add
 | **Library** | Dedicated **Library** menu: browse the official libraries site in the **system browser**, **import** / **save** `.excalidrawlib` files, **reset** personal library items (with confirmation), and **toggle** the library sidebar (docked). See [Library menu & cache](#library-menu--cache) below. |
 | **Library cache** | The full library (built-in rows, imports, and unsaved changes) is **persisted automatically** under the app **user data** directory as `library-cache.excalidrawlib` and **restored on the next launch**. Invalid cache files are discarded. This is **per device** (not cloud-synced). |
 | **UX polish** | In-app **hamburger menu** is hidden so actions live in the **native menubar**; **modal dialogs** (reset canvas / reset library / unsaved) support **Escape**, **backdrop click**, and **focus trap**. Opening **libraries.excalidraw.com** from the app uses the **default browser**, not an in-app window. |
-| **Distribution** | Production builds are packaged with **Electron Forge**; **`npm run make`** produces a **ZIP** per platform (Windows, macOS, Linux). Optional **Windows code signing** via `WINDOWS_CERTIFICATE_FILE` / `WINDOWS_CERTIFICATE_PASSWORD`. |
-| **Quality** | **Jest** tests and **ESLint** in the repo; webpack bundles the UI with fonts and assets **without relying on a public CDN** for the app shell. |
+| **Distribution** | From source you can produce **ZIP** packages per platform with **Electron Forge**; optional **Windows code signing**. Details are in the [Development guide](DEVELOPMENT.md). |
+| **Quality** | **Jest** and **ESLint** in the repository; the UI bundle includes fonts and assets **without relying on a public CDN** for the app shell. See [Development guide](DEVELOPMENT.md) to run tests and lint. |
 
 ---
 
@@ -50,110 +50,15 @@ Use **Cmd** instead of **Ctrl** on macOS where the table says Ctrl (Electron use
 
 ---
 
-## Requirements
+## Usage
 
-- **Node.js** (LTS recommended)
-- **npm** (or another compatible client)
-
----
-
-## Quick start
-
-```bash
-git clone https://github.com/<your-org>/excalidraw-x.git
-cd excalidraw-x
-npm install
-```
-
-### Development
-
-Runs the webpack dev server (port **3000**) and Electron together:
-
-```bash
-npm run dev
-```
-
-### Production bundle (local run)
-
-```bash
-npm run build
-npm run prod
-```
-
-### Package & distributable ZIP
-
-```bash
-# Webpack production build + Forge make (ZIP for current OS)
-npm run make
-
-# Windows x64 only (from any OS that supports cross-targeting, or run on Windows)
-npm run make:win
-```
-
-Artifacts appear under `out/make/zip/…`. Use **`npm run package`** if you only need an unpacked app under `out/` without zipping.
+1. **From source:** clone the repository, run `npm install`, then either run **`npm run dev`** (live-reload development) or **`npm run build`** followed by **`npm run prod`** to run a production build locally.
+2. **Packaging:** to create **ZIP** installers or configure signing, see the **[Development guide](DEVELOPMENT.md)**.
 
 ---
 
-## Scripts
+## License & links
 
-| Script | Purpose |
-|--------|---------|
-| `npm run dev` | Webpack dev server + Electron with HMR |
-| `npm run build` | Webpack production build → `build/` |
-| `npm run prod` | Run Electron against `build/` |
-| `npm run start` | Electron Forge start (alternative entry) |
-| `npm run package` | Build + Forge package (unpacked app) |
-| `npm run make` | Build + Forge **ZIP** for current platform |
-| `npm run make:win` | Build + Forge ZIP for **win32 x64** |
-| `npm test` | Jest |
-| `npm run lint` | ESLint |
-
----
-
-## Project structure (overview)
-
-```text
-excalidraw-x/
-├── main.js                 # Electron main: window, menu, IPC, recent files, library cache, close guard
-├── preload.js              # contextBridge → window.electron
-├── forge.config.js         # Forge packager + ZIP maker + fuses
-├── webpack.config.js
-├── index.html
-├── assets/                 # App / window icons (e.g. icon.ico on Windows)
-├── public/                 # Static assets for dev server / copies
-├── src/
-│   ├── index.jsx           # React entry
-│   ├── App.jsx             # Excalidraw shell, IPC, dialogs, welcome screen
-│   ├── sceneDirty.js       # Snapshot-based dirty detection
-│   └── components/
-│       └── ConfirmModal.jsx
-└── build/                  # Webpack output (generated)
-```
-
----
-
-## Tech stack
-
-- **React** & **React DOM** — UI shell
-- **@excalidraw/excalidraw** — drawing application
-- **Electron** — desktop runtime
-- **Webpack 5** — bundling; **Electron Forge** — packaging and ZIP makers
-- **Jest** & **Testing Library** — tests
-- **ESLint** — linting
-
-Exact versions are pinned in `package.json`.
-
----
-
-## Configuration notes
-
-- **Icons (Windows):** Place **`assets/icon.ico`** (and the base name **`assets/icon`** for electron-packager) for executable and window icons. Maintain these files yourself if you change branding.
-- **Code signing (Windows):** Set `WINDOWS_CERTIFICATE_FILE` and optionally `WINDOWS_CERTIFICATE_PASSWORD` before `npm run make` / `make:win` when you sign release binaries.
-
----
-
-## License
-
-MIT
-
-Excalidraw is a separate project with its own license; see the [Excalidraw repository](https://github.com/excalidraw/excalidraw) for details.
+- This project is licensed under the **[MIT License](LICENSE)**.
+- **Contributors:** setup, scripts, tests, and packaging — **[Development guide](DEVELOPMENT.md)**.
+- Excalidraw is a separate project with its own license; see the [Excalidraw repository](https://github.com/excalidraw/excalidraw) for details.
