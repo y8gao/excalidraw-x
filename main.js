@@ -107,14 +107,6 @@ const buildMenu = () => {
         { type: 'separator' },
         { label: 'Export Image...', accelerator: 'CmdOrCtrl+Shift+E', click: send('export-image') },
         { type: 'separator' },
-        {
-          label: 'Print...',
-          accelerator: 'CmdOrCtrl+P',
-          click: () => {
-            if (mainWindow) mainWindow.webContents.print({ silent: false, printBackground: true });
-          },
-        },
-        { type: 'separator' },
         { label: 'Exit', click: () => app.quit() },
       ],
     },

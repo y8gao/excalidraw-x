@@ -12,7 +12,7 @@ Excalidraw itself is an open-source virtual whiteboard. This repository only add
 
 | Area | What ExcalidrawX adds |
 |------|------------------------|
-| **Files** | **Open / Save / Save As** for `.excalidraw` (and JSON) via native dialogs; **Export PNG** to a chosen path; **Print** through the system print dialog. |
+| **Files** | **Open / Save / Save As** for `.excalidraw` (and JSON) via native dialogs; **Export Image…** (PNG) to a chosen path — print from your system viewer or editor if needed. |
 | **Recent files** | **Open Recent** in the menu and on the **welcome screen**; list persisted under the app user-data folder; **clear recent** from the menu. |
 | **Unsaved changes** | **Dirty tracking** so the window close flow and **New / Open** can prompt to **Save**, **Discard**, or **Cancel** before losing work. |
 | **Window & title** | **Title bar** shows `ExcalidrawX - <filename>` or **Untitled**; integrates with the OS close guard when there are unsaved changes. |
