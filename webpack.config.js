@@ -7,6 +7,11 @@ module.exports = (env, argv) => {
   const isProd = argv && argv.mode === 'production';
   return {
   mode: isProd ? 'production' : 'development',
+  cache: {
+    type: 'filesystem',
+    cacheDirectory: path.resolve(__dirname, 'node_modules/.cache/webpack'),
+    buildDependencies: { config: [__filename] },
+  },
   entry: './src/index.jsx',
   output: {
     path: path.resolve(__dirname, 'build'),

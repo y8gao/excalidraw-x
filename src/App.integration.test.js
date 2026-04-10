@@ -343,21 +343,15 @@ describe('App integration: menu + dirty IPC', () => {
 })
 
 describe('App integration: library cache persistence', () => {
-  let menuHandler
-
   afterEach(() => {
     jest.useRealTimers()
   })
 
   beforeEach(() => {
     __mock.reset()
-    menuHandler = null
     window.electron = {
       setTheme: jest.fn(),
-      onMenuAction: jest.fn((cb) => {
-        menuHandler = cb
-        return () => {}
-      }),
+      onMenuAction: jest.fn(() => () => {}),
       openFile: jest.fn(async () => ({ canceled: true })),
       saveFile: jest.fn(async () => ({ canceled: true })),
       writeText: jest.fn(async () => {}),
