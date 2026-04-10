@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electron', {
 
   openFile: () => ipcRenderer.invoke('dialog:open-file'),
 
+  openLibraryFile: () => ipcRenderer.invoke('dialog:open-library-file'),
+
   saveFile: (opts) => ipcRenderer.invoke('dialog:save-file', opts),
 
   writeText: (filePath, data) => ipcRenderer.invoke('fs:write-text', filePath, data),
@@ -40,4 +42,10 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Get persisted recent files list
   getRecentFiles: () => ipcRenderer.invoke('menu:get-recent-files'),
+
+  readLibraryCache: () => ipcRenderer.invoke('library:read-cache'),
+
+  writeLibraryCache: (data) => ipcRenderer.invoke('library:write-cache', data),
+
+  clearLibraryCache: () => ipcRenderer.invoke('library:clear-cache'),
 });

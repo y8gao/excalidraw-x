@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme, Menu, dialog, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -9,6 +9,9 @@ const MAX_RECENT = 10;
 let recentFiles = [];let isDirtyMain = false;  // mirrors renderer's unsaved-changes state
 const getRecentFilesPath = () =>
   path.join(app.getPath('userData'), 'recent-files.json');
+
+const getLibraryCachePath = () =>
+  path.join(app.getPath('userData'), 'library-cache.excalidrawlib');
 
 const loadRecentFiles = () => {
   try {
@@ -34,11 +37,6 @@ const addRecentFile = (filePath) => {
   buildMenu();
 };
 // ───────────────────────────────────────────────────────────────────────────────
-
-// Handle Squirrel events for Windows installer (must be at the very top)
-if (require('electron-squirrel-startup')) {
-  app.quit();
-}
 
 let mainWindow;
 
@@ -224,6 +222,25 @@ const buildMenu = () => {
       ],
     },
     {
+      label: 'Library',
+      submenu: [
+        {
+          label: 'Browse libraries (web)…',
+          accelerator: 'CmdOrCtrl+Alt+B',
+          click: () => {
+            shell.openExternal('https://libraries.excalidraw.com/');
+          },
+        },
+        { type: 'separator' },
+        { label: 'Import Library…', accelerator: 'CmdOrCtrl+Shift+O', click: send('import-library') },
+        { label: 'Save to…', accelerator: 'CmdOrCtrl+Alt+E', click: send('save-library-as') },
+        { type: 'separator' },
+        { label: 'Reset Library', accelerator: 'CmdOrCtrl+Shift+Backspace', click: send('reset-library') },
+        { type: 'separator' },
+        { label: 'Toggle Library', accelerator: 'CmdOrCtrl+Alt+L', click: send('toggle-library') },
+      ],
+    },
+    {
       label: 'Window',
       submenu: [
         {
@@ -317,16 +334,38 @@ const buildMenu = () => {
 };
 
 const createWindow = async () => {
+  const winIcon =
+    process.platform === 'win32' ? path.join(__dirname, 'assets', 'icon.ico') : undefined;
+
   mainWindow = new BrowserWindow({
     title: 'ExcalidrawX',
     width: 1400,
     height: 900,
+    ...(winIcon && fs.existsSync(winIcon) ? { icon: winIcon } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
     },
+  });
+
+  // Excalidraw "Browse libraries" uses window.open — open in the system browser instead of a second app window.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (
+        (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+        (parsed.hostname === 'libraries.excalidraw.com' ||
+          parsed.hostname === 'www.libraries.excalidraw.com')
+      ) {
+        shell.openExternal(url);
+        return { action: 'deny' };
+      }
+    } catch {
+      /* invalid URL */
+    }
+    return { action: 'allow' };
   });
 
   // Determine the app URL based on environment
@@ -404,6 +443,20 @@ ipcMain.on('menu:set-languages', (event, languages) => {
   buildMenu();
 });
 
+ipcMain.handle('dialog:open-library-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    filters: [
+      { name: 'Excalidraw library', extensions: ['excalidrawlib', 'json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  });
+  if (result.canceled) return { canceled: true };
+  const filePath = result.filePaths[0];
+  const data = await fs.promises.readFile(filePath, 'utf-8');
+  return { canceled: false, data };
+});
+
 ipcMain.handle('dialog:open-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     filters: [
@@ -427,6 +480,32 @@ ipcMain.on('menu:add-recent', (event, filePath) => {
 });
 
 ipcMain.handle('menu:get-recent-files', () => recentFiles);
+
+ipcMain.handle('library:read-cache', async () => {
+  try {
+    const p = getLibraryCachePath();
+    if (!fs.existsSync(p)) return { exists: false };
+    const data = await fs.promises.readFile(p, 'utf-8');
+    return { exists: true, data };
+  } catch (err) {
+    console.error('Library cache read failed:', err);
+    return { exists: false };
+  }
+});
+
+ipcMain.handle('library:write-cache', async (event, data) => {
+  const p = getLibraryCachePath();
+  await fs.promises.writeFile(p, data, 'utf-8');
+});
+
+ipcMain.handle('library:clear-cache', async () => {
+  try {
+    const p = getLibraryCachePath();
+    if (fs.existsSync(p)) await fs.promises.unlink(p);
+  } catch (err) {
+    console.error('Library cache clear failed:', err);
+  }
+});
 
 ipcMain.handle('dialog:save-file', async (event, { defaultPath, filters }) => {
   const result = await dialog.showSaveDialog(mainWindow, { defaultPath, filters });

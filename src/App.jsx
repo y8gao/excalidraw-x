@@ -1,5 +1,19 @@
-import { DefaultSidebar, Excalidraw, MainMenu, Sidebar, WelcomeScreen, exportToBlob, languages, loadFromBlob, serializeAsJSON } from '@excalidraw/excalidraw'
+import {
+  DefaultSidebar,
+  Excalidraw,
+  MainMenu,
+  Sidebar,
+  WelcomeScreen,
+  exportToBlob,
+  languages,
+  loadFromBlob,
+  loadSceneOrLibraryFromBlob,
+  MIME_TYPES,
+  serializeAsJSON,
+  serializeLibraryAsJSON,
+} from '@excalidraw/excalidraw'
 import React from 'react'
+import { flushSync } from 'react-dom'
 import {
   ConfirmModal,
   DIALOG_BTN_DANGER,
@@ -8,12 +22,12 @@ import {
 } from './components/ConfirmModal.jsx'
 import { createSceneSnapshot, isSceneDirty } from './sceneDirty'
 
-// Hide the Excalidraw hamburger trigger and sidebar trigger — all actions are in the native menubar
+// Hide the Excalidraw hamburger trigger — native menubar owns file actions. Do not hide library
+// sidebar controls (tab, search, overflow menu): a broad [aria-label*="library"] rule breaks that UI.
 const HIDE_HAMBURGER_CSS = `
   button.dropdown-menu-button,
   button[aria-label="Menu"],
-  .main-menu-button,
-  button[aria-label*="library" i] {
+  .main-menu-button {
     display: none !important;
   }
 `
@@ -24,6 +38,16 @@ const EXCALIDRAW_SAVE_FILTERS = [
 ]
 
 const UNSAVED_DIALOG_SAVE_FILTERS = [{ name: 'Excalidraw', extensions: ['excalidraw'] }]
+
+const LIBRARY_SAVE_FILTERS = [{ name: 'Excalidraw Library', extensions: ['excalidrawlib'] }]
+
+/** Matches Excalidraw `DEFAULT_SIDEBAR` / `LIBRARY_SIDEBAR_TAB` (@excalidraw/common). */
+const SIDEBAR_NAME_DEFAULT = 'default'
+const SIDEBAR_TAB_LIBRARY = 'library'
+/** Custom `DefaultSidebar` tab in this app (Canvas Settings / preferences). */
+const SIDEBAR_TAB_CANVAS_SETTINGS = 'canvas-settings'
+
+const LIBRARY_CACHE_SAVE_DEBOUNCE_MS = 450
 
 const SidebarSettingsIcon = () => (
   <svg
@@ -68,12 +92,54 @@ const SidebarTriggerIcon = (
   </svg>
 )
 
+/** Matches Excalidraw's internal isUniqueItem comparison (order-sensitive). */
+function libraryItemElementSignature(item, indexForEmpty = 0) {
+  const els = item?.elements
+  if (!Array.isArray(els) || els.length === 0) {
+    return `empty:${item?.id ?? `i${indexForEmpty}`}`
+  }
+  return els.map((e) => `${e.id}:${e.versionNonce}`).join('\n')
+}
+
+/**
+ * - Drop duplicate row ids (fixes React keys).
+ * - For personal (non-published) rows, drop repeats that match an earlier item's element fingerprint
+ *   (same shape, new library id — e.g. re-adding to library). Published defaults are kept first.
+ */
+function dedupeLibraryItems(items) {
+  const seenIds = new Set()
+  const seenSigs = new Set()
+  const out = []
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx]
+    const id = item?.id
+    if (id != null && id !== '' && seenIds.has(id)) continue
+
+    const sig = libraryItemElementSignature(item, idx)
+    const isPublished = item.status === 'published'
+
+    if (isPublished) {
+      if (id != null && id !== '') seenIds.add(id)
+      seenSigs.add(sig)
+      out.push(item)
+      continue
+    }
+
+    if (seenSigs.has(sig)) continue
+    if (id != null && id !== '') seenIds.add(id)
+    seenSigs.add(sig)
+    out.push(item)
+  }
+  return out
+}
+
 const App = () => {
   const [excalidrawAPI, setExcalidrawAPI] = React.useState(null)
   const [langCode, setLangCode] = React.useState('en')
   const [appearance, setAppearance] = React.useState('auto')
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false)
   const [resetDialogOpen, setResetDialogOpen] = React.useState(false)
+  const [resetLibraryDialogOpen, setResetLibraryDialogOpen] = React.useState(false)
   const pendingCloseActionRef = React.useRef('close') // 'close' | 'new'
   const lastThemeRef = React.useRef(null)
   const colorInputRef = React.useRef(null)
@@ -88,6 +154,52 @@ const App = () => {
   const pendingOpenPathRef = React.useRef(null)   // stores filePath when confirming before open
   const [sidebarDocked, setSidebarDocked] = React.useState(false)
   const [recentFiles, setRecentFiles] = React.useState([])
+  const excalidrawApiRef = React.useRef(null)
+  const libraryDedupeBusyRef = React.useRef(false)
+  const libraryItemsRef = React.useRef([])
+  const libraryCacheReadyRef = React.useRef(false)
+  const libraryRestoreBusyRef = React.useRef(false)
+  const libraryRestoreGenerationRef = React.useRef(0)
+  const librarySaveTimerRef = React.useRef(0)
+
+  const flushLibraryCacheNow = React.useCallback(async () => {
+    if (!libraryCacheReadyRef.current || libraryRestoreBusyRef.current) return
+    if (!window.electron?.writeLibraryCache) return
+    window.clearTimeout(librarySaveTimerRef.current)
+    librarySaveTimerRef.current = 0
+    try {
+      await window.electron.writeLibraryCache(serializeLibraryAsJSON(libraryItemsRef.current))
+    } catch (err) {
+      console.error('Library cache write failed:', err)
+    }
+  }, [])
+
+  const scheduleLibraryCacheSave = React.useCallback(() => {
+    if (!libraryCacheReadyRef.current || libraryRestoreBusyRef.current) return
+    if (!window.electron?.writeLibraryCache) return
+    window.clearTimeout(librarySaveTimerRef.current)
+    librarySaveTimerRef.current = window.setTimeout(() => {
+      flushLibraryCacheNow()
+    }, LIBRARY_CACHE_SAVE_DEBOUNCE_MS)
+  }, [flushLibraryCacheNow])
+
+  const handleLibraryChange = React.useCallback((libraryItems) => {
+    libraryItemsRef.current = libraryItems
+    scheduleLibraryCacheSave()
+    const api = excalidrawApiRef.current
+    if (!api || libraryDedupeBusyRef.current) return
+    const deduped = dedupeLibraryItems(libraryItems)
+    if (deduped.length === libraryItems.length) return
+    libraryDedupeBusyRef.current = true
+    queueMicrotask(() => {
+      api
+        .updateLibrary({ libraryItems: deduped, merge: false })
+        .catch(() => {})
+        .finally(() => {
+          libraryDedupeBusyRef.current = false
+        })
+    })
+  }, [scheduleLibraryCacheSave])
 
   // Run fn() without marking canvas dirty (clears the flag after all sync onChange calls settle)
   const withoutDirty = React.useCallback((fn) => {
@@ -242,6 +354,78 @@ const App = () => {
     rememberCurrentSceneCleanSoon()
   }, [excalidrawAPI]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restore library from userData cache on startup; keep cache updated from onLibraryChange.
+  React.useEffect(() => {
+    if (!excalidrawAPI) return
+
+    const read = window.electron?.readLibraryCache
+    if (!read) {
+      libraryCacheReadyRef.current = true
+      queueMicrotask(() => scheduleLibraryCacheSave())
+      return undefined
+    }
+
+    const gen = ++libraryRestoreGenerationRef.current
+    let cancelled = false
+
+    const finishEnableCache = () => {
+      if (cancelled || libraryRestoreGenerationRef.current !== gen) return
+      libraryRestoreBusyRef.current = false
+      libraryCacheReadyRef.current = true
+      queueMicrotask(() => scheduleLibraryCacheSave())
+    }
+
+    ;(async () => {
+      try {
+        const res = await read()
+        if (cancelled || libraryRestoreGenerationRef.current !== gen) return
+
+        if (!res?.exists || !res.data) {
+          return
+        }
+
+        libraryRestoreBusyRef.current = true
+        const blob = new Blob([res.data], { type: MIME_TYPES.excalidrawlib })
+        const contents = await loadSceneOrLibraryFromBlob(blob, null, null)
+        if (cancelled || libraryRestoreGenerationRef.current !== gen) return
+
+        if (contents.type !== MIME_TYPES.excalidrawlib) {
+          await window.electron?.clearLibraryCache?.()
+        } else {
+          const libData = contents.data
+          const rawItems = libData.libraryItems ?? libData.library ?? []
+          const api = excalidrawApiRef.current
+          if (api) {
+            await api.updateLibrary({ libraryItems: rawItems, merge: false })
+          }
+        }
+      } catch (err) {
+        console.error('Library cache restore failed:', err)
+        try {
+          await window.electron?.clearLibraryCache?.()
+        } catch {
+          /* ignore */
+        }
+      } finally {
+        finishEnableCache()
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      libraryRestoreGenerationRef.current += 1
+    }
+  }, [excalidrawAPI, scheduleLibraryCacheSave])
+
+  // Flush debounced library cache when the window is hidden (e.g. quit).
+  React.useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') flushLibraryCacheNow()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [flushLibraryCacheNow])
+
   // Re-apply when appearance setting changes
   React.useEffect(() => {
     applyTheme(appearance)
@@ -346,6 +530,79 @@ const App = () => {
           break
         }
 
+        case 'import-library': {
+          if (!excalidrawAPI || !window.electron?.openLibraryFile) break
+          try {
+            const pick = await window.electron.openLibraryFile()
+            if (pick.canceled) break
+            // Use the official library MIME so updateLibrary's Blob path runs
+            // loadLibraryFromBlob → parseLibraryJSON, which supports both
+            // `libraryItems` and legacy `library` keys (spreading contents.data does not).
+            const blob = new Blob([pick.data], { type: MIME_TYPES.excalidrawlib })
+            const contents = await loadSceneOrLibraryFromBlob(blob, null, null)
+            if (contents.type === MIME_TYPES.excalidrawlib) {
+              // Skip rows already in the library by id (and within-file dupes). Shape-level dedupe for
+              // personal items runs in onLibraryChange via dedupeLibraryItems.
+              const libData = contents.data
+              const rawItems = libData.libraryItems ?? libData.library ?? []
+              await excalidrawAPI.updateLibrary({
+                libraryItems: async (currentItems) => {
+                  const taken = new Set(currentItems.map((item) => item.id))
+                  const seenInFile = new Set()
+                  return rawItems.filter((item) => {
+                    if (Array.isArray(item)) return true
+                    const id = item?.id
+                    if (id == null || id === '') return true
+                    if (taken.has(id) || seenInFile.has(id)) return false
+                    seenInFile.add(id)
+                    return true
+                  })
+                },
+                merge: true,
+                openLibraryMenu: true,
+              })
+            } else {
+              excalidrawAPI.setToast?.({
+                message: 'That file is a drawing, not a library. Download a .excalidrawlib from the libraries site.',
+                closable: true,
+              })
+            }
+          } catch (err) {
+            console.error('Import library failed:', err)
+            excalidrawAPI.setToast?.({
+              message: 'Could not import library. Use a valid .excalidrawlib file.',
+              closable: true,
+            })
+          }
+          break
+        }
+
+        case 'reset-library': {
+          setResetLibraryDialogOpen(true)
+          break
+        }
+
+        case 'save-library-as': {
+          if (!window.electron?.saveFile || !window.electron?.writeText) break
+          try {
+            const json = serializeLibraryAsJSON(libraryItemsRef.current)
+            const result = await window.electron.saveFile({
+              defaultPath: 'library.excalidrawlib',
+              filters: LIBRARY_SAVE_FILTERS,
+            })
+            if (!result.canceled) {
+              await window.electron.writeText(result.filePath, json)
+            }
+          } catch (err) {
+            console.error('Save library failed:', err)
+            excalidrawAPI.setToast?.({
+              message: 'Could not save library file.',
+              closable: true,
+            })
+          }
+          break
+        }
+
         case 'save': {
           await saveDrawing(elements, appState, files, {
             pickPath: 'if-needed',
@@ -390,7 +647,19 @@ const App = () => {
         }
 
         case 'toggle-sidebar': {
-          if (excalidrawAPI) excalidrawAPI.toggleSidebar({ name: 'default' })
+          if (excalidrawAPI) {
+            excalidrawAPI.toggleSidebar({
+              name: SIDEBAR_NAME_DEFAULT,
+              tab: SIDEBAR_TAB_CANVAS_SETTINGS,
+            })
+          }
+          break
+        }
+
+        case 'toggle-library': {
+          if (!excalidrawAPI) break
+          flushSync(() => setSidebarDocked(true))
+          excalidrawAPI.toggleSidebar({ name: SIDEBAR_NAME_DEFAULT, tab: SIDEBAR_TAB_LIBRARY })
           break
         }
 
@@ -521,6 +790,10 @@ const App = () => {
   const dismissResetDialog = React.useCallback(() => {
     setResetDialogOpen(false)
   }, [])
+
+  const dismissResetLibraryDialog = React.useCallback(() => {
+    setResetLibraryDialogOpen(false)
+  }, [])
   // ───────────────────────────────────────────────────────
 
   return (
@@ -532,6 +805,36 @@ const App = () => {
         style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
         onChange={handleBgColorChange}
       />
+
+      <ConfirmModal
+        open={resetLibraryDialogOpen}
+        title="Reset library"
+        onRequestClose={dismissResetLibraryDialog}
+        actions={(
+          <>
+            <button type="button" onClick={dismissResetLibraryDialog} style={DIALOG_BTN_SECONDARY}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => {
+                dismissResetLibraryDialog()
+                if (!excalidrawAPI) return
+                excalidrawAPI
+                  .updateLibrary({
+                    libraryItems: async (currentItems) =>
+                      currentItems.filter((item) => item.status === 'published'),
+                    merge: false,
+                  })
+                  .catch(() => {})
+              }}
+              style={DIALOG_BTN_DANGER}
+            >
+              Reset
+            </button>
+          </>
+        )}
+      >
+        This removes your personal library items from the sidebar. Built-in Excalidraw library items are kept.
+      </ConfirmModal>
 
       <ConfirmModal
         open={resetDialogOpen}
@@ -581,8 +884,12 @@ const App = () => {
       </ConfirmModal>
       <Excalidraw
           onChange={handleChange}
+          onLibraryChange={handleLibraryChange}
           langCode={langCode}
-          excalidrawAPI={(api) => setExcalidrawAPI(api)}
+          excalidrawAPI={(api) => {
+            excalidrawApiRef.current = api
+            setExcalidrawAPI(api)
+          }}
           UIOptions={{ dockedSidebarBreakpoint: 0 }}
         >
           <MainMenu />

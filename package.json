@@ -13,7 +13,8 @@
     "build": "webpack --mode production",
     "prod": "electron .",
     "package": "npm run build && electron-forge package",
-    "make": "npm run build && electron-forge make"
+    "make": "npm run build && electron-forge make",
+    "make:win": "npm run build && electron-forge make --platform win32 --arch x64"
   },
   "keywords": [],
   "author": "Yang Gao <yang.xz.gao@outlook.com>",
@@ -23,7 +24,6 @@
     "@excalidraw/excalidraw": "^0.18.0",
     "d3": "^7.9.0",
     "electron-is-dev": "^2.0.0",
-    "electron-squirrel-startup": "^1.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -32,9 +32,6 @@
     "@babel/preset-env": "^7.23.0",
     "@babel/preset-react": "^7.23.0",
     "@electron-forge/cli": "^7.11.1",
-    "@electron-forge/maker-deb": "^7.11.1",
-    "@electron-forge/maker-rpm": "^7.11.1",
-    "@electron-forge/maker-squirrel": "^7.11.1",
     "@electron-forge/maker-zip": "^7.11.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
     "@electron-forge/plugin-fuses": "^7.11.1",
