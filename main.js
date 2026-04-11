@@ -4,6 +4,10 @@ const http = require('http');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 
+if (process.platform === 'darwin') {
+  app.setName('ExcalidrawX');
+}
+
 // ─── Recent-files persistence ──────────────────────────────────────────────────
 const MAX_RECENT = 10;
 let recentFiles = [];let isDirtyMain = false;  // mirrors renderer's unsaved-changes state
