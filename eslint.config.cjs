@@ -14,7 +14,15 @@ module.exports = [
   },
   js.configs.recommended,
   {
-    files: ['main.js', 'preload.js', 'forge.config.js', 'webpack.config.js', 'jest.config.cjs', 'babel.config.cjs'],
+    files: [
+      'main.js',
+      'preload.js',
+      'forge.config.js',
+      'webpack.config.js',
+      'jest.config.cjs',
+      'babel.config.cjs',
+      '.github/scripts/**/*.js',
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',

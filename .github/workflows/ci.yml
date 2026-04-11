@@ -68,26 +68,12 @@ jobs:
       - name: Make distributables (ZIP)
         run: ${{ matrix.make_cmd }}
 
-      # Artifact name = Forge ZIP basename (no .zip), e.g. ExcalidrawX-darwin-arm64-0.1.2 — matches packager output.
+      # Locator lives at .github/scripts/ci-locate-forge-zip.js (Node, not bash — macOS bash 3.2; Windows shell differs).
       - name: Locate Forge-built ZIP
         id: forge_zip
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t zips < <(find out/make -type f -name '*.zip' | sort)
-          n=${#zips[@]}
-          if [[ "$n" -eq 0 ]]; then
-            echo '::error::No .zip found under out/make'
-            exit 1
-          fi
-          if [[ "$n" -gt 1 ]]; then
-            echo '::error::Expected exactly one .zip under out/make, found:' "${zips[*]}"
-            exit 1
-          fi
-          zip="${zips[0]}"
-          stem=$(basename "$zip" .zip)
-          echo "path=$zip" >> "$GITHUB_OUTPUT"
-          echo "stem=$stem" >> "$GITHUB_OUTPUT"
+        env:
+          ZIP_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
+        run: node .github/scripts/ci-locate-forge-zip.js
 
       - uses: actions/upload-artifact@v4
         with:
