@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 
-// ─── Open .excalidraw / .json from OS (argv, macOS open-file, second instance) ─
+// ─── Open .excalidraw from OS (argv, macOS open-file, second instance) ─
 let pendingOpenFilePath = null;
 
 function validateOpenableFilePath(candidatePath) {
@@ -21,7 +21,7 @@ function validateOpenableFilePath(candidatePath) {
     return null;
   }
   const ext = path.extname(resolved).toLowerCase();
-  if (ext !== '.excalidraw' && ext !== '.json') return null;
+  if (ext !== '.excalidraw') return null;
   return resolved;
 }
 
