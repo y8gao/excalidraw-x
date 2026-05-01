@@ -174,6 +174,7 @@ describe('App integration: menu + dirty IPC', () => {
         menuHandler = cb
         return () => {}
       }),
+      onOpenFilePath: jest.fn(() => () => {}),
       openFile: jest.fn(async () => ({ canceled: true })),
       saveFile: jest.fn(async () => ({ canceled: true })),
       writeText: jest.fn(async () => {}),
@@ -352,6 +353,7 @@ describe('App integration: library cache persistence', () => {
     window.electron = {
       setTheme: jest.fn(),
       onMenuAction: jest.fn(() => () => {}),
+      onOpenFilePath: jest.fn(() => () => {}),
       openFile: jest.fn(async () => ({ canceled: true })),
       saveFile: jest.fn(async () => ({ canceled: true })),
       writeText: jest.fn(async () => {}),
@@ -484,6 +486,7 @@ describe('App integration: import library', () => {
         menuHandler = cb
         return () => {}
       }),
+      onOpenFilePath: jest.fn(() => () => {}),
       openFile: jest.fn(async () => ({ canceled: true })),
       saveFile: jest.fn(async () => ({ canceled: true })),
       writeText: jest.fn(async () => {}),

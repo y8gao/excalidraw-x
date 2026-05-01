@@ -4,6 +4,74 @@ const http = require('http');
 const fs = require('fs');
 const isDev = require('electron-is-dev');
 
+// ─── Open .excalidraw / .json from OS (argv, macOS open-file, second instance) ─
+let pendingOpenFilePath = null;
+
+function validateOpenableFilePath(candidatePath) {
+  if (!candidatePath || typeof candidatePath !== 'string') return null;
+  let resolved;
+  try {
+    resolved = path.resolve(candidatePath);
+  } catch {
+    return null;
+  }
+  try {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+  } catch {
+    return null;
+  }
+  const ext = path.extname(resolved).toLowerCase();
+  if (ext !== '.excalidraw' && ext !== '.json') return null;
+  return resolved;
+}
+
+function extractLaunchFilePath(argv) {
+  if (!argv || argv.length < 2) return null;
+  for (let i = 1; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg || arg.startsWith('-')) continue;
+    const ok = validateOpenableFilePath(arg);
+    if (ok) return ok;
+  }
+  return null;
+}
+
+function sendOpenFilePathToRenderer(filePath) {
+  if (!mainWindow?.webContents || mainWindow.webContents.isDestroyed()) return;
+  mainWindow.webContents.send('open-file-path', filePath);
+}
+
+function enqueueOpenFileFromOs(candidatePath) {
+  const resolved = validateOpenableFilePath(candidatePath);
+  if (!resolved) return;
+  pendingOpenFilePath = resolved;
+  if (mainWindow && !mainWindow.webContents.isDestroyed() && !mainWindow.webContents.isLoading()) {
+    sendOpenFilePathToRenderer(pendingOpenFilePath);
+    pendingOpenFilePath = null;
+  }
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    const fp = extractLaunchFilePath(argv);
+    if (fp) enqueueOpenFileFromOs(fp);
+  });
+
+  if (process.platform === 'darwin') {
+    app.on('open-file', (event, filePath) => {
+      event.preventDefault();
+      enqueueOpenFileFromOs(filePath);
+    });
+  }
+}
+
 if (process.platform === 'darwin') {
   app.setName('ExcalidrawX');
 }
@@ -389,6 +457,13 @@ const createWindow = async () => {
   }
   mainWindow.loadURL(appUrl);
 
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (pendingOpenFilePath) {
+      sendOpenFilePathToRenderer(pendingOpenFilePath);
+      pendingOpenFilePath = null;
+    }
+  });
+
   // Re-apply menu to this window instance now that it exists
   buildMenu();
 
@@ -397,10 +472,23 @@ const createWindow = async () => {
     mainWindow.webContents.openDevTools();
   }
 
-  // Toggle DevTools with Ctrl+Shift+I
+  // Toggle DevTools with Ctrl+Shift+I; route Save shortcuts to native menu handlers so Ctrl/Cmd+S
+  // writes to currentFilePathRef (Excalidraw's in-canvas save opens a browser-style flow).
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.control && input.shift && input.keyCode === 105) {
       mainWindow.webContents.toggleDevTools();
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    const primary = isMac ? input.meta : input.control;
+    if (!primary || input.alt) return;
+    const key = typeof input.key === 'string' ? input.key.toLowerCase() : '';
+    if (key !== 's') return;
+    event.preventDefault();
+    if (input.shift) {
+      mainWindow.webContents.send('menu-action', 'save-as');
+    } else {
+      mainWindow.webContents.send('menu-action', 'save');
     }
   });
 
@@ -532,8 +620,14 @@ ipcMain.handle('fs:write-binary', async (event, filePath, data) => {
 });
 
 app.on('ready', () => {
+  if (!gotSingleInstanceLock) return;
+
   loadRecentFiles();
   buildMenu();
+
+  const launchFile = extractLaunchFilePath(process.argv);
+  if (launchFile) enqueueOpenFileFromOs(launchFile);
+
   createWindow();
 
   // Set dock icon on macOS for development

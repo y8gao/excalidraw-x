@@ -224,8 +224,10 @@ const App = () => {
   const rememberCleanScene = React.useCallback((elements, appState, files) => {
     cleanSceneSnapshotRef.current = createSceneSnapshot(elements, appState, files)
     hasCleanSnapshotRef.current = true
-    markDirty(false)
-  }, [markDirty])
+    isDirtyRef.current = false
+    // Always sync main — markDirty(false) skips IPC when already false, which breaks close guard after save.
+    window.electron?.setDirty(false)
+  }, [])
 
   const rememberCurrentSceneClean = React.useCallback(() => {
     if (!excalidrawAPI) return
@@ -337,6 +339,21 @@ const App = () => {
       if (Array.isArray(files)) setRecentFiles(files)
     })
   }, [])
+
+  // argv / "Open with" / macOS open-file: main sends path here (same dirty guard as Open Recent)
+  React.useEffect(() => {
+    if (!excalidrawAPI || !window.electron?.onOpenFilePath) return undefined
+    return window.electron.onOpenFilePath(async (filePath) => {
+      if (!filePath) return
+      if (isDirtyRef.current) {
+        pendingCloseActionRef.current = 'open'
+        pendingOpenPathRef.current = filePath
+        setCloseDialogOpen(true)
+        return
+      }
+      await doOpenFilePath(filePath)
+    })
+  }, [excalidrawAPI, doOpenFilePath])
 
   // Apply the correct theme to Excalidraw based on appearance + OS setting
   const applyTheme = React.useCallback((currentAppearance) => {

@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('electron', {
     return () => ipcRenderer.removeListener('menu-action', handler);
   },
 
+  /** OS opened a drawing path (argv / open-file / second instance). */
+  onOpenFilePath: (cb) => {
+    const handler = (_e, filePath) => cb(filePath);
+    ipcRenderer.on('open-file-path', handler);
+    return () => ipcRenderer.removeListener('open-file-path', handler);
+  },
+
   openFile: () => ipcRenderer.invoke('dialog:open-file'),
 
   openLibraryFile: () => ipcRenderer.invoke('dialog:open-library-file'),
