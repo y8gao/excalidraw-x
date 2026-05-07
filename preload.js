@@ -1,5 +1,17 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Main may send `open-file-path` on did-finish-load before React subscribes; buffer until onOpenFilePath runs.
+const openFilePathQueue = [];
+let openFilePathConsumer = null;
+
+ipcRenderer.on('open-file-path', (_event, filePath) => {
+  if (openFilePathConsumer) {
+    openFilePathConsumer(filePath);
+  } else {
+    openFilePathQueue.push(filePath);
+  }
+});
+
 contextBridge.exposeInMainWorld('electron', {
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
 
@@ -11,9 +23,18 @@ contextBridge.exposeInMainWorld('electron', {
 
   /** OS opened a drawing path (argv / open-file / second instance). */
   onOpenFilePath: (cb) => {
-    const handler = (_e, filePath) => cb(filePath);
-    ipcRenderer.on('open-file-path', handler);
-    return () => ipcRenderer.removeListener('open-file-path', handler);
+    openFilePathConsumer = cb;
+    const pending = openFilePathQueue.splice(0, openFilePathQueue.length);
+    for (const fp of pending) {
+      try {
+        cb(fp);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    return () => {
+      openFilePathConsumer = null;
+    };
   },
 
   openFile: () => ipcRenderer.invoke('dialog:open-file'),

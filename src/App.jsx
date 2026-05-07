@@ -165,6 +165,9 @@ const App = () => {
   const cleanSceneSnapshotRef = React.useRef('')  // serialized clean snapshot for dirty comparison
   const hasCleanSnapshotRef = React.useRef(false) // becomes true after first clean scene is recorded
   const pendingOpenPathRef = React.useRef(null)   // stores filePath when confirming before open
+  /** OS file open received before Excalidraw onReady; flushed when excalidrawAPI is set. */
+  const pendingOsLaunchPathRef = React.useRef(null)
+  const openFromOsRef = React.useRef(async (_filePath) => {})
   const [sidebarDocked, setSidebarDocked] = React.useState(false)
   const [recentFiles, setRecentFiles] = React.useState([])
   const excalidrawApiRef = React.useRef(null)
@@ -383,11 +386,14 @@ const App = () => {
     })
   }, [])
 
-  // argv / "Open with" / macOS open-file: main sends path here (same dirty guard as Open Recent)
+  // argv / "Open with" / macOS open-file: subscribe on mount (preload buffers early IPC until here).
   React.useEffect(() => {
-    if (!excalidrawAPI || !window.electron?.onOpenFilePath) return undefined
-    return window.electron.onOpenFilePath(async (filePath) => {
+    openFromOsRef.current = async (filePath) => {
       if (!filePath) return
+      if (!excalidrawAPI) {
+        pendingOsLaunchPathRef.current = filePath
+        return
+      }
       if (isDirtyRef.current) {
         pendingCloseActionRef.current = 'open'
         pendingOpenPathRef.current = filePath
@@ -395,8 +401,23 @@ const App = () => {
         return
       }
       await doOpenFilePath(filePath)
-    })
+    }
   }, [excalidrawAPI, doOpenFilePath])
+
+  React.useEffect(() => {
+    if (!excalidrawAPI) return
+    const pending = pendingOsLaunchPathRef.current
+    if (!pending) return
+    pendingOsLaunchPathRef.current = null
+    void openFromOsRef.current(pending)
+  }, [excalidrawAPI])
+
+  React.useEffect(() => {
+    if (!window.electron?.onOpenFilePath) return undefined
+    return window.electron.onOpenFilePath((filePath) => {
+      void openFromOsRef.current(filePath)
+    })
+  }, [])
 
   // Apply the correct theme to Excalidraw based on appearance + OS setting
   const applyTheme = React.useCallback((currentAppearance) => {
