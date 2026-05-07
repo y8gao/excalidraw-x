@@ -46,14 +46,18 @@ jobs:
         include:
           - os: ubuntu-latest
             make_cmd: npm run make
+            artifact_slug: linux-x64
           - os: windows-latest
             make_cmd: npm run make
+            artifact_slug: win32-x64
           # Apple Silicon (host arch on macos-latest)
           - os: macos-latest
             make_cmd: npm run make
+            artifact_slug: darwin-arm64
           # Intel Mac — Forge targets x64 from the arm64 runner
           - os: macos-latest
             make_cmd: npm run make:mac-x64
+            artifact_slug: darwin-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -77,10 +81,18 @@ jobs:
           ZIP_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
         run: node .github/scripts/ci-locate-forge-zip.js
 
+      - name: Canonicalize ZIP filename for release
+        id: release_zip
+        env:
+          FORGE_ZIP_PATH: ${{ steps.forge_zip.outputs.path }}
+          ARTIFACT_SLUG: ${{ matrix.artifact_slug }}
+          ZIP_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
+        run: node .github/scripts/ci-canonicalize-zip.js
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.forge_zip.outputs.stem }}
-          path: ${{ steps.forge_zip.outputs.path }}
+          name: ${{ steps.release_zip.outputs.stem }}
+          path: ${{ steps.release_zip.outputs.path }}
           if-no-files-found: error
 
       - name: Locate Forge-built MSI (Windows)
@@ -110,7 +122,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          # Same stem as Forge ZIPs (version from package.json at tag), not the git tag string.
+          # Matches upload-artifact `name` from canonicalize step: ExcalidrawX-<platform>-<version>.
           pattern: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-*
           merge-multiple: true
 
