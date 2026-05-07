@@ -167,7 +167,7 @@ const App = () => {
   const pendingOpenPathRef = React.useRef(null)   // stores filePath when confirming before open
   /** OS file open received before Excalidraw onReady; flushed when excalidrawAPI is set. */
   const pendingOsLaunchPathRef = React.useRef(null)
-  const openFromOsRef = React.useRef(async (_filePath) => {})
+  const openFromOsRef = React.useRef(async () => {})
   const [sidebarDocked, setSidebarDocked] = React.useState(false)
   const [recentFiles, setRecentFiles] = React.useState([])
   const excalidrawApiRef = React.useRef(null)
