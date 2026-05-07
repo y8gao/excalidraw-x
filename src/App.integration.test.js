@@ -49,7 +49,7 @@ jest.mock('@excalidraw/excalidraw', () => {
   }
 
   const Excalidraw = ({ onChange, excalidrawAPI, onLibraryChange, children }) => {
-    ReactLib.useEffect(() => {
+    ReactLib.useLayoutEffect(() => {
       mockState.onChange = onChange
       excalidrawAPI(api)
       onLibraryChange?.([
@@ -184,6 +184,7 @@ describe('App integration: menu + dirty IPC', () => {
       setDirty: jest.fn(),
       setWindowTitle: jest.fn(),
       closeWindow: jest.fn(),
+      relaunchApp: jest.fn(),
       readFile: jest.fn(async () => '{"ok":true}'),
       addRecentFile: jest.fn(),
       getRecentFiles: jest.fn(async () => []),
@@ -363,6 +364,7 @@ describe('App integration: library cache persistence', () => {
       setDirty: jest.fn(),
       setWindowTitle: jest.fn(),
       closeWindow: jest.fn(),
+      relaunchApp: jest.fn(),
       readFile: jest.fn(async () => '{"ok":true}'),
       addRecentFile: jest.fn(),
       getRecentFiles: jest.fn(async () => []),
@@ -496,6 +498,7 @@ describe('App integration: import library', () => {
       setDirty: jest.fn(),
       setWindowTitle: jest.fn(),
       closeWindow: jest.fn(),
+      relaunchApp: jest.fn(),
       readFile: jest.fn(async () => '{"ok":true}'),
       addRecentFile: jest.fn(),
       getRecentFiles: jest.fn(async () => []),

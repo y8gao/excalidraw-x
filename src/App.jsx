@@ -21,6 +21,7 @@ import {
   DIALOG_BTN_SECONDARY,
 } from './components/ConfirmModal.jsx'
 import { createSceneSnapshot, isSceneDirty } from './sceneDirty'
+import { getUiStrings } from '../electronUiStrings.js'
 
 // Hide the Excalidraw hamburger trigger — native menubar owns file actions. Do not hide library
 // sidebar controls (tab, search, overflow menu): a broad [aria-label*="library"] rule breaks that UI.
@@ -136,15 +137,27 @@ function dedupeLibraryItems(items) {
 const App = () => {
   const [excalidrawAPI, setExcalidrawAPI] = React.useState(null)
   const [langCode, setLangCode] = React.useState('en')
+  const ui = React.useMemo(() => getUiStrings(langCode), [langCode])
   const [appearance, setAppearance] = React.useState('auto')
+  const [settingsHydrated, setSettingsHydrated] = React.useState(
+    () => typeof window.electron?.getAppSettings !== 'function',
+  )
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false)
   const [resetDialogOpen, setResetDialogOpen] = React.useState(false)
   const [resetLibraryDialogOpen, setResetLibraryDialogOpen] = React.useState(false)
+  const [languageRestartOpen, setLanguageRestartOpen] = React.useState(false)
   const pendingCloseActionRef = React.useRef('close') // 'close' | 'new'
   const lastThemeRef = React.useRef(null)
   const colorInputRef = React.useRef(null)
   const currentBgRef = React.useRef('#ffffff')
   const lastMenuStateRef = React.useRef({ zenMode: false, gridMode: false, snapMode: false, viewMode: false })
+  const bootSettingsRef = React.useRef({
+    zenMode: false,
+    gridMode: false,
+    snapMode: false,
+    viewMode: false,
+  })
+  const didBootstrapExcalidrawRef = React.useRef(false)
   const currentFilePathRef = React.useRef(null)  // path of the last opened/saved .excalidraw file
   const isDirtyRef = React.useRef(false)          // true when there are unsaved changes
   // While true, onChange calls are ignored (programmatic scene updates)
@@ -215,11 +228,12 @@ const App = () => {
     window.electron?.setDirty(val)
   }, [])
 
-  // Update window title: "ExcalidrawX - filename" or "ExcalidrawX - Untitled"
+  // Update window title: "ExcalidrawX - filename" or localized untitled name
   const updateTitle = React.useCallback((filePath) => {
-    const name = filePath ? filePath.split(/[/\\]/).pop() : 'Untitled'
+    const strings = getUiStrings(langCode)
+    const name = filePath ? filePath.split(/[/\\]/).pop() : strings.windowUntitled
     window.electron?.setWindowTitle(`ExcalidrawX - ${name}`)
-  }, [])
+  }, [langCode])
 
   const rememberCleanScene = React.useCallback((elements, appState, files) => {
     cleanSceneSnapshotRef.current = createSceneSnapshot(elements, appState, files)
@@ -333,6 +347,35 @@ const App = () => {
     await doOpenFilePath(filePath)
   }, [doOpenFilePath])
 
+  // Load persisted menu preferences (appearance, language, view toggles) before first paint of Excalidraw
+  React.useEffect(() => {
+    if (typeof window.electron?.getAppSettings !== 'function') return undefined
+    let cancelled = false
+    window.electron
+      .getAppSettings()
+      .then((s) => {
+        if (cancelled || !s) return
+        if (typeof s.langCode === 'string' && s.langCode) setLangCode(s.langCode)
+        if (s.appearance === 'auto' || s.appearance === 'light' || s.appearance === 'dark') {
+          setAppearance(s.appearance)
+        }
+        bootSettingsRef.current = {
+          zenMode: Boolean(s.zenMode),
+          gridMode: Boolean(s.gridMode),
+          snapMode: Boolean(s.snapMode),
+          viewMode: Boolean(s.viewMode),
+        }
+        lastMenuStateRef.current = { ...bootSettingsRef.current }
+        setSettingsHydrated(true)
+      })
+      .catch(() => {
+        if (!cancelled) setSettingsHydrated(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Load recent files on mount
   React.useEffect(() => {
     window.electron?.getRecentFiles?.().then(files => {
@@ -364,12 +407,28 @@ const App = () => {
     withoutDirty(() => excalidrawAPI.updateScene({ appState: { theme } }))
   }, [excalidrawAPI, withoutDirty])
 
-  // Apply initial theme as soon as the API is ready, then record the blank canvas as clean
+  // First paint after settings load: theme + persisted view toggles in one update, then clean snapshot
+  // before other effects (e.g. [appearance, applyTheme]) run another theme pass.
   React.useEffect(() => {
-    if (!excalidrawAPI) return
-    applyTheme(appearance)
-    rememberCurrentSceneCleanSoon()
-  }, [excalidrawAPI]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!excalidrawAPI || !settingsHydrated || didBootstrapExcalidrawRef.current) return
+    didBootstrapExcalidrawRef.current = true
+    const b = bootSettingsRef.current
+    const theme = appearance === 'auto'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : appearance
+    withoutDirty(() =>
+      excalidrawAPI.updateScene({
+        appState: {
+          theme,
+          zenModeEnabled: b.zenMode,
+          gridModeEnabled: b.gridMode,
+          objectsSnapModeEnabled: b.snapMode,
+          viewModeEnabled: b.viewMode,
+        },
+      }),
+    )
+    rememberCurrentSceneClean()
+  }, [appearance, excalidrawAPI, rememberCurrentSceneClean, settingsHydrated, withoutDirty])
 
   // Restore library from userData cache on startup; keep cache updated from onLibraryChange.
   React.useEffect(() => {
@@ -686,7 +745,12 @@ const App = () => {
         }
 
         case 'lang': {
-          setLangCode(actionValue)
+          setLangCode((prev) => {
+            if (prev !== actionValue) {
+              queueMicrotask(() => setLanguageRestartOpen(true))
+            }
+            return actionValue
+          })
           break
         }
 
@@ -811,7 +875,20 @@ const App = () => {
   const dismissResetLibraryDialog = React.useCallback(() => {
     setResetLibraryDialogOpen(false)
   }, [])
+
+  const dismissLanguageRestart = React.useCallback(() => {
+    setLanguageRestartOpen(false)
+  }, [])
+
+  const handleLanguageRestartNow = React.useCallback(() => {
+    setLanguageRestartOpen(false)
+    window.electron?.relaunchApp?.()
+  }, [])
   // ───────────────────────────────────────────────────────
+
+  if (!settingsHydrated) {
+    return <div style={{ width: '100vw', height: '100vh' }} aria-busy="true" />
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
@@ -824,12 +901,26 @@ const App = () => {
       />
 
       <ConfirmModal
+        open={languageRestartOpen}
+        title={ui.languageRestartTitle}
+        onRequestClose={dismissLanguageRestart}
+        actions={(
+          <>
+            <button type="button" onClick={dismissLanguageRestart} style={DIALOG_BTN_SECONDARY}>{ui.languageRestartLater}</button>
+            <button type="button" onClick={handleLanguageRestartNow} style={DIALOG_BTN_PRIMARY}>{ui.languageRestartNow}</button>
+          </>
+        )}
+      >
+        {ui.languageRestartBody}
+      </ConfirmModal>
+
+      <ConfirmModal
         open={resetLibraryDialogOpen}
-        title="Reset library"
+        title={ui.confirmResetLibraryTitle}
         onRequestClose={dismissResetLibraryDialog}
         actions={(
           <>
-            <button type="button" onClick={dismissResetLibraryDialog} style={DIALOG_BTN_SECONDARY}>Cancel</button>
+            <button type="button" onClick={dismissResetLibraryDialog} style={DIALOG_BTN_SECONDARY}>{ui.confirmResetLibraryCancel}</button>
             <button
               type="button"
               onClick={() => {
@@ -845,21 +936,21 @@ const App = () => {
               }}
               style={DIALOG_BTN_DANGER}
             >
-              Reset
+              {ui.confirmResetLibraryReset}
             </button>
           </>
         )}
       >
-        This removes your personal library items from the sidebar. Built-in Excalidraw library items are kept.
+        {ui.confirmResetLibraryBody}
       </ConfirmModal>
 
       <ConfirmModal
         open={resetDialogOpen}
-        title="Reset canvas"
+        title={ui.confirmResetCanvasTitle}
         onRequestClose={dismissResetDialog}
         actions={(
           <>
-            <button type="button" onClick={dismissResetDialog} style={DIALOG_BTN_SECONDARY}>Cancel</button>
+            <button type="button" onClick={dismissResetDialog} style={DIALOG_BTN_SECONDARY}>{ui.confirmResetCanvasCancel}</button>
             <button
               type="button"
               onClick={() => {
@@ -871,33 +962,33 @@ const App = () => {
               }}
               style={DIALOG_BTN_DANGER}
             >
-              Reset
+              {ui.confirmResetCanvasReset}
             </button>
           </>
         )}
       >
-        This will clear the whole canvas. All unsaved changes will be lost.
+        {ui.confirmResetCanvasBody}
       </ConfirmModal>
 
       <ConfirmModal
         open={closeDialogOpen}
-        title="Unsaved changes"
+        title={ui.confirmUnsavedTitle}
         onRequestClose={handleCloseCancel}
         actions={(
           <>
-            <button type="button" onClick={handleCloseCancel} style={DIALOG_BTN_SECONDARY}>Cancel</button>
-            <button type="button" onClick={handleCloseDiscard} style={DIALOG_BTN_DANGER}>Discard</button>
-            <button type="button" onClick={handleCloseSave} style={DIALOG_BTN_PRIMARY}>Save</button>
+            <button type="button" onClick={handleCloseCancel} style={DIALOG_BTN_SECONDARY}>{ui.confirmUnsavedCancel}</button>
+            <button type="button" onClick={handleCloseDiscard} style={DIALOG_BTN_DANGER}>{ui.confirmUnsavedDiscard}</button>
+            <button type="button" onClick={handleCloseSave} style={DIALOG_BTN_PRIMARY}>{ui.confirmUnsavedSave}</button>
           </>
         )}
       >
         {pendingCloseActionRef.current === 'new'
-          ? 'Do you want to save your changes before creating a new drawing?'
+          ? ui.confirmUnsavedMsgNew
           : pendingCloseActionRef.current === 'open'
-            ? 'Do you want to save your changes before opening another file?'
-            : 'Do you want to save your changes before closing?'}
+            ? ui.confirmUnsavedMsgOpen
+            : ui.confirmUnsavedMsgClose}
         {' '}
-        Unsaved changes will be lost.
+        {ui.confirmUnsavedSuffix}
       </ConfirmModal>
       <Excalidraw
           onChange={handleChange}
@@ -913,29 +1004,29 @@ const App = () => {
           {/* Custom sidebar: Canvas Settings tab + built-in Library (📚) + Find on Canvas (🔍) tabs */}
           <DefaultSidebar docked={sidebarDocked} onDock={setSidebarDocked}>
             <DefaultSidebar.TabTriggers>
-              <Sidebar.TabTrigger tab="canvas-settings" title="Canvas Settings">
+              <Sidebar.TabTrigger tab="canvas-settings" title={ui.sidebarCanvasSettings}>
                 <SidebarSettingsIcon />
               </Sidebar.TabTrigger>
             </DefaultSidebar.TabTriggers>
             <Sidebar.Tab tab="canvas-settings" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginTop: 4 }}>Canvas Settings</div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginTop: 4 }}>{ui.sidebarCanvasSettings}</div>
               <MainMenu.DefaultItems.ChangeCanvasBackground />
             </Sidebar.Tab>
           </DefaultSidebar>
           {/* Trigger button — renders into the top-right corner via Excalidraw's tunnel */}
-          <DefaultSidebar.Trigger title="Canvas Settings" icon={SidebarTriggerIcon} />
+          <DefaultSidebar.Trigger title={ui.sidebarCanvasSettings} icon={SidebarTriggerIcon} />
           <WelcomeScreen>
             <WelcomeScreen.Center>
               <WelcomeScreen.Center.Logo />
               <WelcomeScreen.Center.Heading>
-                Welcome to ExcalidrawX!
+                {ui.welcomeHeading}
               </WelcomeScreen.Center.Heading>
               <WelcomeScreen.Center.Menu>
                 <WelcomeScreen.Center.MenuItem
                   onSelect={triggerOpenFile}
                   shortcut="Ctrl+O"
                 >
-                  Open File...
+                  {ui.welcomeOpenFile}
                 </WelcomeScreen.Center.MenuItem>
                 {recentFiles.length > 0 && (
                   <>
@@ -948,7 +1039,7 @@ const App = () => {
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
                     }}>
-                      Recent files
+                      {ui.welcomeRecentFiles}
                     </div>
                     {recentFiles.slice(0, 5).map(fp => (
                       <WelcomeScreen.Center.MenuItem

@@ -16,6 +16,7 @@ module.exports = [
   {
     files: [
       'main.js',
+      'electronUiStrings.js',
       'preload.js',
       'forge.config.js',
       'webpack.config.js',

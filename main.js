@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, nativeTheme, Menu, dialog, shell } = require('electron');
+const { getUiStrings } = require('./electronUiStrings');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -103,6 +104,43 @@ const saveRecentFiles = () => {
   } catch (err) { console.error('Failed to save recent files:', err); }
 };
 
+// ─── App menu preferences (appearance, language, view toggles) ───────────────
+const getAppSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json');
+
+const DEFAULT_APP_SETTINGS = {
+  appearance: 'auto',
+  langCode: 'en',
+  zenMode: false,
+  gridMode: false,
+  snapMode: false,
+  viewMode: false,
+};
+
+const loadAppSettingsFromDisk = () => {
+  try {
+    const p = getAppSettingsPath();
+    if (!fs.existsSync(p)) return { ...DEFAULT_APP_SETTINGS };
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_APP_SETTINGS };
+    const appearance = ['auto', 'light', 'dark'].includes(parsed.appearance)
+      ? parsed.appearance
+      : DEFAULT_APP_SETTINGS.appearance;
+    const langCode = typeof parsed.langCode === 'string' && parsed.langCode.trim() !== ''
+      ? parsed.langCode.trim()
+      : DEFAULT_APP_SETTINGS.langCode;
+    return {
+      appearance,
+      langCode,
+      zenMode: Boolean(parsed.zenMode),
+      gridMode: Boolean(parsed.gridMode),
+      snapMode: Boolean(parsed.snapMode),
+      viewMode: Boolean(parsed.viewMode),
+    };
+  } catch {
+    return { ...DEFAULT_APP_SETTINGS };
+  }
+};
+
 const addRecentFile = (filePath) => {
   recentFiles = [filePath, ...recentFiles.filter(f => f !== filePath)].slice(0, MAX_RECENT);
   saveRecentFiles();
@@ -140,7 +178,25 @@ let menuState = {
   languages: [],
 };
 
+const saveAppSettingsToDisk = () => {
+  try {
+    const data = {
+      appearance: menuState.appearance,
+      langCode: menuState.langCode,
+      zenMode: menuState.zenMode,
+      gridMode: menuState.gridMode,
+      snapMode: menuState.snapMode,
+      viewMode: menuState.viewMode,
+    };
+    fs.writeFileSync(getAppSettingsPath(), JSON.stringify(data), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save app settings:', err);
+  }
+};
+
 const buildMenu = () => {
+  const L = getUiStrings(menuState.langCode);
+
   const send = (action) => () => {
     if (mainWindow) mainWindow.webContents.send('menu-action', action);
   };
@@ -148,17 +204,18 @@ const buildMenu = () => {
   // Checkbox click: flip local state, rebuild, then tell renderer the new explicit value
   const toggleState = (key, actionName) => () => {
     menuState[key] = !menuState[key];
+    saveAppSettingsToDisk();
     buildMenu();
     if (mainWindow) mainWindow.webContents.send('menu-action', `${actionName}:${menuState[key]}`);
   };
 
   const template = [
     {
-      label: 'File',
+      label: L.menuFile,
       submenu: [
-        { label: 'Open...', accelerator: 'CmdOrCtrl+O', click: send('open') },
+        { label: L.menuOpen, accelerator: 'CmdOrCtrl+O', click: send('open') },
         {
-          label: 'Open Recent',
+          label: L.menuOpenRecent,
           submenu: recentFiles.length > 0
             ? [
                 ...recentFiles.map(fp => ({
@@ -167,26 +224,26 @@ const buildMenu = () => {
                 })),
                 { type: 'separator' },
                 {
-                  label: 'Clear Recent Items',
+                  label: L.menuClearRecentItems,
                   click: () => { recentFiles = []; saveRecentFiles(); buildMenu(); },
                 },
               ]
-            : [{ label: 'No Recent Items', enabled: false }],
+            : [{ label: L.menuNoRecentItems, enabled: false }],
         },
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: send('save') },
-        { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: send('save-as') },
+        { label: L.menuSave, accelerator: 'CmdOrCtrl+S', click: send('save') },
+        { label: L.menuSaveAs, accelerator: 'CmdOrCtrl+Shift+S', click: send('save-as') },
         { type: 'separator' },
-        { label: 'Export Image...', accelerator: 'CmdOrCtrl+Shift+E', click: send('export-image') },
+        { label: L.menuExportImage, accelerator: 'CmdOrCtrl+Shift+E', click: send('export-image') },
         { type: 'separator' },
         { role: 'quit' },
       ],
     },
     {
-      label: 'Edit',
+      label: L.menuEdit,
       submenu: [
         {
-          label: 'Undo',
+          label: L.menuUndo,
           accelerator: 'CmdOrCtrl+Z',
           click: () => {
             if (!mainWindow) return;
@@ -195,7 +252,7 @@ const buildMenu = () => {
           },
         },
         {
-          label: 'Redo',
+          label: L.menuRedo,
           accelerator: 'CmdOrCtrl+Shift+Z',
           click: () => {
             if (!mainWindow) return;
@@ -210,7 +267,7 @@ const buildMenu = () => {
         { role: 'selectAll' },
         { type: 'separator' },
         {
-          label: 'Find on Canvas',
+          label: L.menuFindOnCanvas,
           accelerator: 'CmdOrCtrl+F',
           click: () => {
             if (!mainWindow) return;
@@ -221,31 +278,31 @@ const buildMenu = () => {
       ],
     },
     {
-      label: 'View',
+      label: L.menuView,
       submenu: [
         {
-          label: 'View Mode',
+          label: L.menuViewMode,
           type: 'checkbox',
           checked: menuState.viewMode,
           accelerator: 'Alt+R',
           click: toggleState('viewMode', 'view-mode'),
         },
         {
-          label: 'Zen Mode',
+          label: L.menuZenMode,
           type: 'checkbox',
           checked: menuState.zenMode,
           accelerator: 'Alt+Z',
           click: toggleState('zenMode', 'zen-mode'),
         },
         {
-          label: 'Grid',
+          label: L.menuGrid,
           type: 'checkbox',
           checked: menuState.gridMode,
           accelerator: "CmdOrCtrl+'",
           click: toggleState('gridMode', 'grid'),
         },
         {
-          label: 'Snap to Objects',
+          label: L.menuSnapToObjects,
           type: 'checkbox',
           checked: menuState.snapMode,
           accelerator: 'Alt+S',
@@ -253,7 +310,7 @@ const buildMenu = () => {
         },
         { type: 'separator' },
         {
-          label: 'Zoom In',
+          label: L.menuZoomIn,
           accelerator: 'CmdOrCtrl+=',
           click: () => {
             if (!mainWindow) return;
@@ -262,7 +319,7 @@ const buildMenu = () => {
           },
         },
         {
-          label: 'Zoom Out',
+          label: L.menuZoomOut,
           accelerator: 'CmdOrCtrl+-',
           click: () => {
             if (!mainWindow) return;
@@ -271,7 +328,7 @@ const buildMenu = () => {
           },
         },
         {
-          label: 'Reset Zoom',
+          label: L.menuResetZoom,
           accelerator: 'CmdOrCtrl+0',
           click: () => {
             if (!mainWindow) return;
@@ -280,65 +337,68 @@ const buildMenu = () => {
           },
         },
         { type: 'separator' },
-        { label: 'Reset Canvas', accelerator: 'CmdOrCtrl+Delete', click: send('reset-canvas') },
+        { label: L.menuResetCanvas, accelerator: 'CmdOrCtrl+Delete', click: send('reset-canvas') },
         { type: 'separator' },
-        { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: send('toggle-sidebar') },
+        { label: L.menuToggleSidebar, accelerator: 'CmdOrCtrl+B', click: send('toggle-sidebar') },
       ],
     },
     {
-      label: 'Library',
+      label: L.menuLibrary,
       submenu: [
         {
-          label: 'Browse libraries (web)…',
+          label: L.menuBrowseLibrariesWeb,
           accelerator: 'CmdOrCtrl+Alt+B',
           click: () => {
             shell.openExternal('https://libraries.excalidraw.com/');
           },
         },
         { type: 'separator' },
-        { label: 'Import Library…', accelerator: 'CmdOrCtrl+Shift+O', click: send('import-library') },
-        { label: 'Save to…', accelerator: 'CmdOrCtrl+Alt+E', click: send('save-library-as') },
+        { label: L.menuImportLibrary, accelerator: 'CmdOrCtrl+Shift+O', click: send('import-library') },
+        { label: L.menuSaveLibraryAs, accelerator: 'CmdOrCtrl+Alt+E', click: send('save-library-as') },
         { type: 'separator' },
-        { label: 'Reset Library', accelerator: 'CmdOrCtrl+Shift+Backspace', click: send('reset-library') },
+        { label: L.menuResetLibrary, accelerator: 'CmdOrCtrl+Shift+Backspace', click: send('reset-library') },
         { type: 'separator' },
-        { label: 'Toggle Library', accelerator: 'CmdOrCtrl+Alt+L', click: send('toggle-library') },
+        { label: L.menuToggleLibrary, accelerator: 'CmdOrCtrl+Alt+L', click: send('toggle-library') },
       ],
     },
     {
-      label: 'Window',
+      label: L.menuWindow,
       submenu: [
         {
-          label: 'Appearance',
+          label: L.menuAppearance,
           submenu: [
             {
-              label: 'Auto',
+              label: L.menuAppearanceAuto,
               type: 'radio',
               checked: menuState.appearance === 'auto',
               click: () => {
                 menuState.appearance = 'auto';
                 nativeTheme.themeSource = 'system';
+                saveAppSettingsToDisk();
                 buildMenu();
                 if (mainWindow) mainWindow.webContents.send('menu-action', 'appearance:auto');
               },
             },
             {
-              label: 'Light',
+              label: L.menuAppearanceLight,
               type: 'radio',
               checked: menuState.appearance === 'light',
               click: () => {
                 menuState.appearance = 'light';
                 nativeTheme.themeSource = 'light';
+                saveAppSettingsToDisk();
                 buildMenu();
                 if (mainWindow) mainWindow.webContents.send('menu-action', 'appearance:light');
               },
             },
             {
-              label: 'Dark',
+              label: L.menuAppearanceDark,
               type: 'radio',
               checked: menuState.appearance === 'dark',
               click: () => {
                 menuState.appearance = 'dark';
                 nativeTheme.themeSource = 'dark';
+                saveAppSettingsToDisk();
                 buildMenu();
                 if (mainWindow) mainWindow.webContents.send('menu-action', 'appearance:dark');
               },
@@ -346,42 +406,43 @@ const buildMenu = () => {
           ],
         },
         ...(menuState.languages.length > 0 ? [{
-          label: 'Language',
+          label: L.menuLanguage,
           submenu: menuState.languages.map(({ code, label }) => ({
             label,
             type: 'radio',
             checked: menuState.langCode === code,
             click: () => {
               menuState.langCode = code;
+              saveAppSettingsToDisk();
               buildMenu();
               if (mainWindow) mainWindow.webContents.send('menu-action', `lang:${code}`);
             },
           })),
         }] : []),
         { type: 'separator' },
-        { label: 'Fullscreen', role: 'togglefullscreen' },
+        { label: L.menuFullscreen, role: 'togglefullscreen' },
       ],
     },
     {
-      label: 'Help',
+      label: L.menuHelp,
       submenu: [
-        { label: 'Shortcuts', click: send('help') },
-        { label: 'Command Palette', accelerator: 'CmdOrCtrl+/', click: send('command-palette') },
+        { label: L.menuShortcuts, click: send('help') },
+        { label: L.menuCommandPalette, accelerator: 'CmdOrCtrl+/', click: send('command-palette') },
         { type: 'separator' },
         {
-          label: 'About ExcalidrawX',
+          label: L.menuAboutExcalidrawX,
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
-              title: 'About ExcalidrawX',
+              title: L.aboutDialogTitle,
               message: 'ExcalidrawX',
               detail: [
-                `Version: ${app.getVersion()}`,
-                `Electron: ${process.versions.electron}`,
-                `Chrome: ${process.versions.chrome}`,
-                `Node.js: ${process.versions.node}`,
+                `${L.aboutDialogVersionLine}: ${app.getVersion()}`,
+                `${L.aboutDialogElectronLine}: ${process.versions.electron}`,
+                `${L.aboutDialogChromeLine}: ${process.versions.chrome}`,
+                `${L.aboutDialogNodeLine}: ${process.versions.node}`,
               ].join('\n'),
-              buttons: ['OK'],
+              buttons: [L.aboutDialogOk],
             });
           },
         },
@@ -519,6 +580,11 @@ ipcMain.on('window:close-confirmed', () => {
   if (mainWindow) mainWindow.destroy();
 });
 
+ipcMain.on('app:relaunch', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 ipcMain.on('window:set-title', (event, title) => {
   if (mainWindow) mainWindow.setTitle(title);
 });
@@ -534,8 +600,18 @@ ipcMain.on('set-theme', (event, theme) => {
 
 ipcMain.on('menu:state-update', (event, state) => {
   Object.assign(menuState, state);
+  saveAppSettingsToDisk();
   buildMenu();
 });
+
+ipcMain.handle('app-settings:get', () => ({
+  appearance: menuState.appearance,
+  langCode: menuState.langCode,
+  zenMode: menuState.zenMode,
+  gridMode: menuState.gridMode,
+  snapMode: menuState.snapMode,
+  viewMode: menuState.viewMode,
+}));
 
 ipcMain.on('menu:set-languages', (event, languages) => {
   menuState.languages = languages;
@@ -623,6 +699,13 @@ app.on('ready', () => {
   if (!gotSingleInstanceLock) return;
 
   loadRecentFiles();
+  const persisted = loadAppSettingsFromDisk();
+  Object.assign(menuState, persisted);
+  if (menuState.appearance === 'auto') {
+    nativeTheme.themeSource = 'system';
+  } else {
+    nativeTheme.themeSource = menuState.appearance;
+  }
   buildMenu();
 
   const launchFile = extractLaunchFilePath(process.argv);

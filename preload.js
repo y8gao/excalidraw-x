@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('electron', {
 
   writeBinary: (filePath, data) => ipcRenderer.invoke('fs:write-binary', filePath, data),
 
+  // Persisted appearance / language / view toggles (read on startup before canvas mounts)
+  getAppSettings: () => ipcRenderer.invoke('app-settings:get'),
+
   // Send toggle/mode state to main so menu checkmarks stay accurate
   sendMenuState: (state) => ipcRenderer.send('menu:state-update', state),
 
@@ -40,6 +43,9 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Confirmed close: bypasses guard, destroys window (called after user saves/discards)
   closeWindow: () => ipcRenderer.send('window:close-confirmed'),
+
+  /** Full restart (e.g. after language change). */
+  relaunchApp: () => ipcRenderer.send('app:relaunch'),
 
   // Read a file directly by path (used for Open Recent)
   readFile: (filePath) => ipcRenderer.invoke('fs:read-file', filePath),
