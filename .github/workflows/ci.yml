@@ -102,12 +102,25 @@ jobs:
           MSI_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
         run: node .github/scripts/ci-locate-forge-msi.js
 
+      # WiX emits ExcalidrawX.msi; upload-artifact used stem "ExcalidrawX", which does not match
+      # download-artifact pattern "ExcalidrawX-*", so the MSI never reached the release job.
+      # Canonical name + artifact "…-msi" matches the pattern and avoids clashing with the ZIP artifact.
+      - name: Canonicalize MSI filename for release
+        if: runner.os == 'Windows'
+        id: release_msi
+        env:
+          FORGE_MSI_PATH: ${{ steps.forge_msi.outputs.path }}
+          ARTIFACT_SLUG: ${{ matrix.artifact_slug }}
+          MSI_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
+        run: node .github/scripts/ci-canonicalize-msi.js
+
       - name: Upload MSI installer
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.forge_msi.outputs.stem }}
-          path: ${{ steps.forge_msi.outputs.path }}
+          # Must differ from ZIP artifact name (same stem) to avoid upload-artifact v4 409 in one job.
+          name: ${{ steps.release_msi.outputs.stem }}-msi
+          path: ${{ steps.release_msi.outputs.path }}
           if-no-files-found: error
 
   # Attach ZIPs from all matrix legs to a GitHub Release for the tag (public download).
@@ -122,7 +135,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          # Matches upload-artifact `name` from canonicalize step: ExcalidrawX-<platform>-<version>.
+          # ZIP: ExcalidrawX-<platform>-<version>; MSI artifact: same stem + "-msi" suffix.
           pattern: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-*
           merge-multiple: true
 
