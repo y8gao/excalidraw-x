@@ -58,6 +58,7 @@ const LIBRARY_CACHE_SAVE_DEBOUNCE_MS = 450
  */
 function getOsOpenPollConfig() {
   try {
+    // eslint-disable-next-line no-undef -- process is safe-guarded by typeof; only defined in Jest
     if (typeof process !== 'undefined' && process.env.JEST_WORKER_ID != null) {
       return { maxAttempts: 24, delayMs: 50 }
     }
@@ -216,7 +217,7 @@ const App = () => {
     } catch (err) {
       console.error('Library cache write failed:', err)
     }
-  }, [])
+  }, [desktopApi])
 
   const scheduleLibraryCacheSave = React.useCallback(() => {
     if (!libraryCacheReadyRef.current || libraryRestoreBusyRef.current) return
@@ -225,7 +226,7 @@ const App = () => {
     librarySaveTimerRef.current = window.setTimeout(() => {
       flushLibraryCacheNow()
     }, LIBRARY_CACHE_SAVE_DEBOUNCE_MS)
-  }, [flushLibraryCacheNow])
+  }, [flushLibraryCacheNow, desktopApi])
 
   const handleLibraryChange = React.useCallback((libraryItems) => {
     libraryItemsRef.current = libraryItems
@@ -257,14 +258,14 @@ const App = () => {
     if (isDirtyRef.current === val) return
     isDirtyRef.current = val
     desktopApi?.setDirty(val)
-  }, [])
+  }, [desktopApi])
 
   // Update window title: "ExcalidrawX - filename" or localized untitled name
   const updateTitle = React.useCallback((filePath) => {
     const strings = getUiStrings(langCode)
     const name = filePath ? filePath.split(/[/\\]/).pop() : strings.windowUntitled
     desktopApi?.setWindowTitle(`ExcalidrawX - ${name}`)
-  }, [langCode])
+  }, [langCode, desktopApi])
 
   const rememberCleanScene = React.useCallback((elements, appState, files) => {
     cleanSceneSnapshotRef.current = createSceneSnapshot(elements, appState, files)
@@ -272,7 +273,7 @@ const App = () => {
     isDirtyRef.current = false
     // Always sync main — markDirty(false) skips IPC when already false, which breaks close guard after save.
     desktopApi?.setDirty(false)
-  }, [])
+  }, [desktopApi])
 
   const rememberCurrentSceneClean = React.useCallback(() => {
     if (!excalidrawAPI) return
@@ -308,7 +309,7 @@ const App = () => {
       desktopApi?.addRecentFile(filePath)
       setRecentFiles(prev => [filePath, ...prev.filter(f => f !== filePath)].slice(0, 10))
     }
-  }, [appearance, excalidrawAPI, rememberCleanScene, updateTitle, withoutDirty])
+  }, [appearance, desktopApi, excalidrawAPI, rememberCleanScene, updateTitle, withoutDirty])
 
   const doOpenFile = React.useCallback(async (result) => {
     if (!excalidrawAPI || result.canceled) return
@@ -346,7 +347,7 @@ const App = () => {
         osOpenInFlightRef.current = null
       }
     }
-  }, [applyLoadedScene, excalidrawAPI])
+  }, [applyLoadedScene, desktopApi, excalidrawAPI])
 
   const saveDrawing = React.useCallback(async (elements, appState, files, { pickPath, filters }) => {
     try {
@@ -369,7 +370,7 @@ const App = () => {
       console.error('Failed to save file:', err)
       return { ok: false }
     }
-  }, [rememberCleanScene, updateTitle])
+  }, [desktopApi, rememberCleanScene, updateTitle])
 
   // Open a file, guarding dirty state first (used by WelcomeScreen Open button)
   const triggerOpenFile = React.useCallback(async () => {
@@ -381,7 +382,7 @@ const App = () => {
     }
     const result = await desktopApi.openFile()
     if (!result.canceled) await doOpenFile(result)
-  }, [doOpenFile])
+  }, [desktopApi, doOpenFile])
 
   // Open a recent file, guarding dirty state first (used by WelcomeScreen recent items)
   const triggerOpenFilePath = React.useCallback(async (filePath) => {
@@ -445,14 +446,14 @@ const App = () => {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktopApi])
 
   // Load recent files on mount
   React.useEffect(() => {
     desktopApi?.getRecentFiles?.().then(files => {
       if (Array.isArray(files)) setRecentFiles(files)
     })
-  }, [])
+  }, [desktopApi])
 
   // argv / "Open with" / macOS open-file: subscribe on mount (desktop may deliver path before the webview is ready).
   React.useEffect(() => {
@@ -498,7 +499,7 @@ const App = () => {
       terminalLog('info', 'onOpenFilePath event received: ' + filePath)
       scheduleOsFileOpen(filePath)
     })
-  }, [scheduleOsFileOpen])
+  }, [desktopApi, scheduleOsFileOpen])
 
   React.useEffect(() => {
     if (!desktopApi?.takePendingOsFile) {
@@ -555,7 +556,7 @@ const App = () => {
       cancelled = true
       console.log('[excalidraw-x] takePendingOsFile poll: cancelled')
     }
-  }, [scheduleOsFileOpen])
+  }, [desktopApi, scheduleOsFileOpen])
 
   // Apply the correct theme to Excalidraw based on appearance + OS setting
   const applyTheme = React.useCallback((currentAppearance) => {
@@ -646,7 +647,7 @@ const App = () => {
       cancelled = true
       libraryRestoreGenerationRef.current += 1
     }
-  }, [excalidrawAPI, scheduleLibraryCacheSave])
+  }, [desktopApi, excalidrawAPI, scheduleLibraryCacheSave])
 
   // Flush debounced library cache when the window is hidden (e.g. quit).
   React.useEffect(() => {
@@ -655,7 +656,7 @@ const App = () => {
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [flushLibraryCacheNow])
+  }, [flushLibraryCacheNow, desktopApi])
 
   // Re-apply when appearance setting changes
   React.useEffect(() => {
@@ -698,7 +699,7 @@ const App = () => {
       lastMenuStateRef.current = next
       desktopApi?.sendMenuState(next)
     }
-  }, [excalidrawAPI, markDirty])
+  }, [desktopApi, excalidrawAPI, markDirty])
 
   React.useEffect(() => {
     if (!excalidrawAPI) return
@@ -958,7 +959,7 @@ const App = () => {
     })
 
     return cleanup
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
 
   const handleBgColorChange = React.useCallback((e) => {
     if (!excalidrawAPI) return
@@ -998,7 +999,7 @@ const App = () => {
         if (!openResult.canceled) await doOpenFile(openResult)
       }
     }
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
 
   const handleCloseDiscard = React.useCallback(async () => {
     const action = pendingCloseActionRef.current
@@ -1022,7 +1023,7 @@ const App = () => {
         if (!result.canceled) await doOpenFile(result)
       }
     }
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, markDirty, rememberCurrentSceneCleanSoon, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, markDirty, rememberCurrentSceneCleanSoon, updateTitle, withoutDirty])
 
   const handleCloseCancel = React.useCallback(() => {
     setCloseDialogOpen(false)
@@ -1043,7 +1044,7 @@ const App = () => {
   const handleLanguageRestartNow = React.useCallback(() => {
     setLanguageRestartOpen(false)
     desktopApi?.relaunchApp?.()
-  }, [])
+  }, [desktopApi])
   // ───────────────────────────────────────────────────────
 
   if (!settingsHydrated) {
