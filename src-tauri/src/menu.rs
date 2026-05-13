@@ -354,6 +354,7 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: &tauri::menu::Me
         s.clear_recent_files();
       }
       let _ = rebuild_menu(app);
+      emit!("recent-cleared");
     }
     s if s.starts_with("recent:") => {
       let idx: usize = s.trim_start_matches("recent:").parse().unwrap_or(usize::MAX);
@@ -383,31 +384,40 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: &tauri::menu::Me
     "help_shortcuts" => emit!("help"),
     "help_command_palette" => emit!("command-palette"),
     "help_about" => {
-      let Ok(st) = state_mutex.lock() else {
-        return;
-      };
-      let lang = normalize_lang(&st.menu_state.lang_code);
-      let about_labels = locale_strings(&lang);
-      let version = app.package_info().version.to_string();
-      let tauri_ver = tauri::VERSION;
-      let webview_ver = tauri::webview_version().unwrap_or_else(|_| "?".into());
-      let detail = format!(
-        "{}\n{}: {}\n\n{}\n\n{}: {}\n{}: {}",
-        "ExcalidrawX",
-        t(&about_labels, "aboutDialogVersionLine"),
-        version,
-        t(&about_labels, "aboutDialogProjectHint"),
-        t(&about_labels, "aboutDialogHostLine"),
-        tauri_ver,
-        t(&about_labels, "aboutDialogWebViewLine"),
-        webview_ver,
-      );
-      let ok_lbl = t(&about_labels, "aboutDialogOk");
-      let open_lbl = t(&about_labels, "aboutDialogOpenGithub");
+      // Collect strings while holding the lock briefly, then drop it before
+      // the blocking dialog. Holding the mutex across rfd::show() freezes all
+      // other IPC (commands, menu rebuilds, the re-emit loop) until the dialog
+      // closes — and can deadlock when they flood in on dismiss.
+      let (title, detail, ok_lbl, open_lbl) = {
+        let Ok(st) = state_mutex.lock() else { return };
+        let lang = normalize_lang(&st.menu_state.lang_code);
+        let labels = locale_strings(&lang);
+        let version = app.package_info().version.to_string();
+        let d = format!(
+          "{}\n{}: {}\n\n{}\n\n{}: {}\n{}: {}",
+          "ExcalidrawX",
+          t(&labels, "aboutDialogVersionLine"),
+          version,
+          t(&labels, "aboutDialogProjectHint"),
+          t(&labels, "aboutDialogHostLine"),
+          tauri::VERSION,
+          t(&labels, "aboutDialogWebViewLine"),
+          tauri::webview_version().unwrap_or_else(|_| "?".into()),
+        );
+        (
+          t(&labels, "aboutDialogTitle"),
+          d,
+          t(&labels, "aboutDialogOk"),
+          t(&labels, "aboutDialogOpenGithub"),
+        )
+      }; // lock dropped here
+
+      // No set_parent: on macOS, attaching to the parent window creates a
+      // sheet dialog (beginSheetModalForWindow + semaphore) whose nested
+      // event loop conflicts with Tauri's, causing a hang when dismissed.
       let result = rfd::MessageDialog::new()
-        .set_title(&t(&about_labels, "aboutDialogTitle"))
-        .set_description(detail)
-        .set_parent(&win)
+        .set_title(&title)
+        .set_description(&detail)
         .set_buttons(rfd::MessageButtons::OkCancelCustom(
           ok_lbl.clone(),
           open_lbl.clone(),

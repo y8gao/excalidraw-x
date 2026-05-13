@@ -761,6 +761,11 @@ const App = () => {
           break
         }
 
+        case 'recent-cleared': {
+          setRecentFiles([])
+          break
+        }
+
         case 'import-library': {
           if (!excalidrawAPI || !desktopApi?.openLibraryFile) break
           try {
