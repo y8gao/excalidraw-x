@@ -1,7 +1,12 @@
+jest.mock('./desktopApi.js', () => ({
+  getDesktopApi: jest.fn(),
+  terminalLog: jest.fn(),
+}))
 import { __mock, serializeLibraryAsJSON } from '@excalidraw/excalidraw'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import App from './App'
+import { getDesktopApi } from './desktopApi.js'
 
 jest.mock('@excalidraw/excalidraw', () => {
   const ReactLib = require('react')
@@ -161,38 +166,61 @@ const flush = async () => {
   })
 }
 
+/** Wait until settings hydrate + Excalidraw bootstrap recorded a clean snapshot (`setDirty(false)`). */
+async function waitForDesktopBootstrap(desktop) {
+  await waitFor(() => {
+    expect(desktop.setDirty).toHaveBeenCalledWith(false)
+  })
+}
+
+/** Set by `onMenuAction` mock when wiring menu-driven tests. */
+let menuHandler = null
+
+function createDesktopMocks() {
+  return {
+    setTheme: jest.fn(),
+    onMenuAction: jest.fn((cb) => {
+      menuHandler = cb
+      return () => {}
+    }),
+    onOpenFilePath: jest.fn(() => () => {}),
+    takePendingOsFile: jest.fn(async () => null),
+    openFile: jest.fn(async () => ({ canceled: true })),
+    saveFile: jest.fn(async () => ({ canceled: true })),
+    writeText: jest.fn(async () => {}),
+    writeBinary: jest.fn(async () => {}),
+    sendMenuState: jest.fn(),
+    setLanguages: jest.fn(),
+    setDirty: jest.fn(),
+    setWindowTitle: jest.fn(),
+    closeWindow: jest.fn(),
+    relaunchApp: jest.fn(),
+    readFile: jest.fn(async () => '{"ok":true}'),
+    addRecentFile: jest.fn(),
+    getRecentFiles: jest.fn(async () => []),
+    openLibraryFile: jest.fn(async () => ({ canceled: true })),
+    readLibraryCache: jest.fn(async () => ({ exists: false })),
+    writeLibraryCache: jest.fn(async () => {}),
+    clearLibraryCache: jest.fn(async () => {}),
+    getAppSettings: jest.fn(async () => ({
+      appearance: 'auto',
+      langCode: 'en',
+      zenMode: false,
+      gridMode: false,
+      snapMode: false,
+      viewMode: false,
+    })),
+  }
+}
+
 describe('App integration: menu + dirty IPC', () => {
-  let menuHandler
+  let desktop
 
   beforeEach(() => {
     __mock.reset()
     menuHandler = null
-
-    window.electron = {
-      setTheme: jest.fn(),
-      onMenuAction: jest.fn((cb) => {
-        menuHandler = cb
-        return () => {}
-      }),
-      onOpenFilePath: jest.fn(() => () => {}),
-      openFile: jest.fn(async () => ({ canceled: true })),
-      saveFile: jest.fn(async () => ({ canceled: true })),
-      writeText: jest.fn(async () => {}),
-      writeBinary: jest.fn(async () => {}),
-      sendMenuState: jest.fn(),
-      setLanguages: jest.fn(),
-      setDirty: jest.fn(),
-      setWindowTitle: jest.fn(),
-      closeWindow: jest.fn(),
-      relaunchApp: jest.fn(),
-      readFile: jest.fn(async () => '{"ok":true}'),
-      addRecentFile: jest.fn(),
-      getRecentFiles: jest.fn(async () => []),
-      openLibraryFile: jest.fn(async () => ({ canceled: true })),
-      readLibraryCache: jest.fn(async () => ({ exists: false })),
-      writeLibraryCache: jest.fn(async () => {}),
-      clearLibraryCache: jest.fn(async () => {}),
-    }
+    desktop = createDesktopMocks()
+    getDesktopApi.mockReturnValue(desktop)
   })
 
   it('opens file directly when clean (no dialog)', async () => {
@@ -203,13 +231,14 @@ describe('App integration: menu + dirty IPC', () => {
       await menuHandler('open')
     })
 
-    expect(window.electron.openFile).toHaveBeenCalledTimes(1)
+    expect(desktop.openFile).toHaveBeenCalledTimes(1)
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
   })
 
   it('shows save/discard dialog before open when dirty', async () => {
     render(React.createElement(App))
     await flush()
+    await waitForDesktopBootstrap(desktop)
 
     act(() => {
       __mock.emitChange(
@@ -218,25 +247,26 @@ describe('App integration: menu + dirty IPC', () => {
       )
     })
 
-    await waitFor(() => expect(window.electron.setDirty).toHaveBeenCalledWith(true))
+    await waitFor(() => expect(desktop.setDirty).toHaveBeenCalledWith(true))
 
     await act(async () => {
       await menuHandler('open')
     })
 
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
-    expect(window.electron.openFile).toHaveBeenCalledTimes(0)
+    expect(desktop.openFile).toHaveBeenCalledTimes(0)
 
     await act(async () => {
       fireEvent.click(screen.getByText('Discard'))
     })
 
-    expect(window.electron.openFile).toHaveBeenCalledTimes(1)
+    expect(desktop.openFile).toHaveBeenCalledTimes(1)
   })
 
   it('discard on close clears dirty and closes window', async () => {
     render(React.createElement(App))
     await flush()
+    await waitForDesktopBootstrap(desktop)
 
     act(() => {
       __mock.emitChange(
@@ -245,7 +275,7 @@ describe('App integration: menu + dirty IPC', () => {
       )
     })
 
-    await waitFor(() => expect(window.electron.setDirty).toHaveBeenCalledWith(true))
+    await waitFor(() => expect(desktop.setDirty).toHaveBeenCalledWith(true))
 
     await act(async () => {
       await menuHandler('confirm-close')
@@ -257,12 +287,12 @@ describe('App integration: menu + dirty IPC', () => {
       fireEvent.click(screen.getByText('Discard'))
     })
 
-    expect(window.electron.setDirty).toHaveBeenCalledWith(false)
-    expect(window.electron.closeWindow).toHaveBeenCalledTimes(1)
+    expect(desktop.setDirty).toHaveBeenCalledWith(false)
+    expect(desktop.closeWindow).toHaveBeenCalledTimes(1)
   })
 
   it('renders recent files block with heading and separators in welcome menu', async () => {
-    window.electron.getRecentFiles = jest.fn(async () => [
+    desktop.getRecentFiles = jest.fn(async () => [
       'C:/drawings/alpha.excalidraw',
       'C:/drawings/beta.excalidraw',
     ])
@@ -277,7 +307,7 @@ describe('App integration: menu + dirty IPC', () => {
   })
 
   it('save-library-as writes serialized library when path chosen', async () => {
-    window.electron.saveFile = jest.fn(async () => ({ canceled: false, filePath: 'C:/lib.excalidrawlib' }))
+    desktop.saveFile = jest.fn(async () => ({ canceled: false, filePath: 'C:/lib.excalidrawlib' }))
 
     render(React.createElement(App))
     await flush()
@@ -287,7 +317,7 @@ describe('App integration: menu + dirty IPC', () => {
     })
 
     expect(serializeLibraryAsJSON).toHaveBeenCalled()
-    expect(window.electron.writeText).toHaveBeenCalledWith(
+    expect(desktop.writeText).toHaveBeenCalledWith(
       'C:/lib.excalidrawlib',
       '{"type":"excalidrawlib","libraryItems":[]}',
     )
@@ -344,40 +374,197 @@ describe('App integration: menu + dirty IPC', () => {
   })
 })
 
+describe('App integration: OS file open (argv / takePendingOsFile)', () => {
+  let desktop
+
+  beforeEach(() => {
+    __mock.reset()
+    menuHandler = null
+    desktop = createDesktopMocks()
+    getDesktopApi.mockReturnValue(desktop)
+  })
+
+  it('opens file when takePendingOsFile resolves after Excalidraw is ready (async race)', async () => {
+    let shared
+    let resolvePending
+    desktop.takePendingOsFile = jest.fn(() => {
+      if (!shared) {
+        shared = new Promise((r) => {
+          resolvePending = r
+        })
+      }
+      return shared
+    })
+    desktop.readFile = jest.fn(async () => '{}')
+    const excalidraw = require('@excalidraw/excalidraw')
+    excalidraw.loadFromBlob.mockResolvedValueOnce({
+      elements: [{ id: 'argv-late', type: 'rectangle', x: 0, y: 0, width: 5, height: 5 }],
+      appState: { viewBackgroundColor: '#ffffff', name: 'argv', theme: 'light' },
+      files: {},
+    })
+
+    render(React.createElement(App))
+    await flush()
+    await waitForDesktopBootstrap(desktop)
+
+    await act(async () => {
+      resolvePending('/data/late-launch.excalidraw')
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(desktop.readFile).toHaveBeenCalledWith('/data/late-launch.excalidraw')
+    })
+    expect(__mock.getExcalidrawApi().getSceneElements().some((e) => e.id === 'argv-late')).toBe(true)
+  })
+
+  it('opens file when takePendingOsFile resolves in the same turn as startup (early path)', async () => {
+    let gavePath = false
+    desktop.takePendingOsFile = jest.fn(async () => {
+      if (gavePath) return null
+      gavePath = true
+      return '/data/quick-launch.excalidraw'
+    })
+    desktop.readFile = jest.fn(async () => '{}')
+    const excalidraw = require('@excalidraw/excalidraw')
+    excalidraw.loadFromBlob.mockResolvedValueOnce({
+      elements: [{ id: 'argv-quick', type: 'rectangle', x: 0, y: 0, width: 5, height: 5 }],
+      appState: { viewBackgroundColor: '#ffffff', name: 'quick', theme: 'light' },
+      files: {},
+    })
+
+    render(React.createElement(App))
+    await flush()
+    await waitForDesktopBootstrap(desktop)
+
+    await waitFor(() => {
+      expect(desktop.readFile).toHaveBeenCalledWith('/data/quick-launch.excalidraw')
+    })
+    expect(__mock.getExcalidrawApi().getSceneElements().some((e) => e.id === 'argv-quick')).toBe(true)
+  })
+
+  it('opens file when takePendingOsFile stays null until a later poll (macOS Opened after first take)', async () => {
+    let n = 0
+    desktop.takePendingOsFile = jest.fn(async () => {
+      n++
+      if (n === 4) return '/data/poll-launch.excalidraw'
+      return null
+    })
+    desktop.readFile = jest.fn(async () => '{}')
+    const excalidraw = require('@excalidraw/excalidraw')
+    excalidraw.loadFromBlob.mockResolvedValueOnce({
+      elements: [{ id: 'poll-launch', type: 'rectangle', x: 0, y: 0, width: 5, height: 5 }],
+      appState: { viewBackgroundColor: '#ffffff', name: 'poll', theme: 'light' },
+      files: {},
+    })
+
+    render(React.createElement(App))
+    await flush()
+    await waitForDesktopBootstrap(desktop)
+
+    await waitFor(
+      () => {
+        expect(desktop.readFile).toHaveBeenCalledWith('/data/poll-launch.excalidraw')
+      },
+      { timeout: 4000 },
+    )
+    expect(__mock.getExcalidrawApi().getSceneElements().some((e) => e.id === 'poll-launch')).toBe(true)
+  })
+
+  it('opens once when takePendingOsFile and onOpenFilePath repeat the same path before read finishes', async () => {
+    let deliverPath = null
+    let finishRead
+    let pendingTaken = false
+    desktop.takePendingOsFile = jest.fn(async () => {
+      if (pendingTaken) return null
+      pendingTaken = true
+      return '/data/dedupe.excalidraw'
+    })
+    desktop.onOpenFilePath = jest.fn((cb) => {
+      deliverPath = cb
+      return () => {}
+    })
+    desktop.readFile = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finishRead = () => resolve('{}')
+        }),
+    )
+    const excalidraw = require('@excalidraw/excalidraw')
+    excalidraw.loadFromBlob.mockResolvedValueOnce({
+      elements: [{ id: 'dedupe', type: 'rectangle', x: 0, y: 0, width: 5, height: 5 }],
+      appState: { viewBackgroundColor: '#ffffff', name: 'dedupe', theme: 'light' },
+      files: {},
+    })
+
+    render(React.createElement(App))
+    await flush()
+    await waitForDesktopBootstrap(desktop)
+
+    await waitFor(() => {
+      expect(desktop.readFile).toHaveBeenCalledWith('/data/dedupe.excalidraw')
+    })
+    expect(desktop.readFile).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      deliverPath('/data/dedupe.excalidraw')
+      await Promise.resolve()
+    })
+    expect(desktop.readFile).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      finishRead()
+      await Promise.resolve()
+    })
+    expect(__mock.getExcalidrawApi().getSceneElements().some((e) => e.id === 'dedupe')).toBe(true)
+  })
+
+  it('opens file when onOpenFilePath delivers a path after startup', async () => {
+    let deliverPath = null
+    desktop.onOpenFilePath = jest.fn((cb) => {
+      deliverPath = cb
+      return () => {}
+    })
+    desktop.readFile = jest.fn(async () => '{}')
+    const excalidraw = require('@excalidraw/excalidraw')
+    excalidraw.loadFromBlob.mockResolvedValueOnce({
+      elements: [{ id: 'argv-event', type: 'rectangle', x: 0, y: 0, width: 5, height: 5 }],
+      appState: { viewBackgroundColor: '#ffffff', name: 'event', theme: 'light' },
+      files: {},
+    })
+
+    render(React.createElement(App))
+    await flush()
+    await waitForDesktopBootstrap(desktop)
+
+    await act(async () => {
+      deliverPath('/data/second-instance.excalidraw')
+    })
+
+    await waitFor(() => {
+      expect(desktop.readFile).toHaveBeenCalledWith('/data/second-instance.excalidraw')
+    })
+    expect(__mock.getExcalidrawApi().getSceneElements().some((e) => e.id === 'argv-event')).toBe(true)
+  })
+})
+
 describe('App integration: library cache persistence', () => {
+  let desktop
+
   afterEach(() => {
     jest.useRealTimers()
   })
 
   beforeEach(() => {
     __mock.reset()
-    window.electron = {
-      setTheme: jest.fn(),
-      onMenuAction: jest.fn(() => () => {}),
-      onOpenFilePath: jest.fn(() => () => {}),
-      openFile: jest.fn(async () => ({ canceled: true })),
-      saveFile: jest.fn(async () => ({ canceled: true })),
-      writeText: jest.fn(async () => {}),
-      writeBinary: jest.fn(async () => {}),
-      sendMenuState: jest.fn(),
-      setLanguages: jest.fn(),
-      setDirty: jest.fn(),
-      setWindowTitle: jest.fn(),
-      closeWindow: jest.fn(),
-      relaunchApp: jest.fn(),
-      readFile: jest.fn(async () => '{"ok":true}'),
-      addRecentFile: jest.fn(),
-      getRecentFiles: jest.fn(async () => []),
-      openLibraryFile: jest.fn(async () => ({ canceled: true })),
-      readLibraryCache: jest.fn(async () => ({ exists: false })),
-      writeLibraryCache: jest.fn(async () => {}),
-      clearLibraryCache: jest.fn(async () => {}),
-    }
+    desktop = createDesktopMocks()
+    desktop.onMenuAction = jest.fn(() => () => {})
+    getDesktopApi.mockReturnValue(desktop)
   })
 
   it('restores library from local cache with merge false', async () => {
     const excalidraw = require('@excalidraw/excalidraw')
-    window.electron.readLibraryCache = jest.fn(async () => ({
+    desktop.readLibraryCache = jest.fn(async () => ({
       exists: true,
       data: '{"type":"excalidrawlib","libraryItems":[]}',
     }))
@@ -404,7 +591,7 @@ describe('App integration: library cache persistence', () => {
 
   it('clears library cache file when cached payload is not excalidrawlib', async () => {
     const excalidraw = require('@excalidraw/excalidraw')
-    window.electron.readLibraryCache = jest.fn(async () => ({ exists: true, data: '{}' }))
+    desktop.readLibraryCache = jest.fn(async () => ({ exists: true, data: '{}' }))
     excalidraw.loadSceneOrLibraryFromBlob.mockResolvedValue({
       type: excalidraw.MIME_TYPES.excalidraw,
       data: {},
@@ -415,13 +602,13 @@ describe('App integration: library cache persistence', () => {
       await flush()
     })
 
-    expect(window.electron.clearLibraryCache).toHaveBeenCalled()
+    expect(desktop.clearLibraryCache).toHaveBeenCalled()
   })
 
   it('clears library cache when restore throws', async () => {
     const excalidraw = require('@excalidraw/excalidraw')
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
-    window.electron.readLibraryCache = jest.fn(async () => ({ exists: true, data: 'bad' }))
+    desktop.readLibraryCache = jest.fn(async () => ({ exists: true, data: 'bad' }))
     excalidraw.loadSceneOrLibraryFromBlob.mockRejectedValue(new Error('parse failed'))
 
     render(React.createElement(App))
@@ -429,7 +616,7 @@ describe('App integration: library cache persistence', () => {
       await flush()
     })
 
-    expect(window.electron.clearLibraryCache).toHaveBeenCalled()
+    expect(desktop.clearLibraryCache).toHaveBeenCalled()
     errSpy.mockRestore()
   })
 
@@ -438,11 +625,11 @@ describe('App integration: library cache persistence', () => {
     await flush()
     await waitFor(
       () => {
-        expect(window.electron.writeLibraryCache).toHaveBeenCalled()
+        expect(desktop.writeLibraryCache).toHaveBeenCalled()
       },
       { timeout: 4000 },
     )
-    expect(window.electron.writeLibraryCache).toHaveBeenCalledWith(
+    expect(desktop.writeLibraryCache).toHaveBeenCalledWith(
       '{"type":"excalidrawlib","libraryItems":[]}',
     )
   })
@@ -450,8 +637,8 @@ describe('App integration: library cache persistence', () => {
   it('flushes library cache when document becomes hidden', async () => {
     render(React.createElement(App))
     await flush()
-    await waitFor(() => expect(window.electron.writeLibraryCache).toHaveBeenCalled(), { timeout: 4000 })
-    window.electron.writeLibraryCache.mockClear()
+    await waitFor(() => expect(desktop.writeLibraryCache).toHaveBeenCalled(), { timeout: 4000 })
+    desktop.writeLibraryCache.mockClear()
 
     await act(async () => {
       Object.defineProperty(document, 'visibilityState', {
@@ -462,7 +649,7 @@ describe('App integration: library cache persistence', () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
 
-    await waitFor(() => expect(window.electron.writeLibraryCache).toHaveBeenCalled(), { timeout: 3000 })
+    await waitFor(() => expect(desktop.writeLibraryCache).toHaveBeenCalled(), { timeout: 3000 })
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -473,7 +660,7 @@ describe('App integration: library cache persistence', () => {
 })
 
 describe('App integration: import library', () => {
-  let menuHandler
+  let desktop
 
   afterEach(() => {
     jest.useRealTimers()
@@ -482,36 +669,13 @@ describe('App integration: import library', () => {
   beforeEach(() => {
     __mock.reset()
     menuHandler = null
-    window.electron = {
-      setTheme: jest.fn(),
-      onMenuAction: jest.fn((cb) => {
-        menuHandler = cb
-        return () => {}
-      }),
-      onOpenFilePath: jest.fn(() => () => {}),
-      openFile: jest.fn(async () => ({ canceled: true })),
-      saveFile: jest.fn(async () => ({ canceled: true })),
-      writeText: jest.fn(async () => {}),
-      writeBinary: jest.fn(async () => {}),
-      sendMenuState: jest.fn(),
-      setLanguages: jest.fn(),
-      setDirty: jest.fn(),
-      setWindowTitle: jest.fn(),
-      closeWindow: jest.fn(),
-      relaunchApp: jest.fn(),
-      readFile: jest.fn(async () => '{"ok":true}'),
-      addRecentFile: jest.fn(),
-      getRecentFiles: jest.fn(async () => []),
-      openLibraryFile: jest.fn(async () => ({ canceled: true })),
-      readLibraryCache: jest.fn(async () => ({ exists: false })),
-      writeLibraryCache: jest.fn(async () => {}),
-      clearLibraryCache: jest.fn(async () => {}),
-    }
+    desktop = createDesktopMocks()
+    getDesktopApi.mockReturnValue(desktop)
   })
 
   it('import-library merges file and opens library menu', async () => {
     const excalidraw = require('@excalidraw/excalidraw')
-    window.electron.openLibraryFile = jest.fn(async () => ({
+    desktop.openLibraryFile = jest.fn(async () => ({
       canceled: false,
       data: '{"libraryItems":[{"id":"imp","elements":[]}]}',
     }))
@@ -538,7 +702,7 @@ describe('App integration: import library', () => {
 
   it('import-library shows toast when file is a drawing not a library', async () => {
     const excalidraw = require('@excalidraw/excalidraw')
-    window.electron.openLibraryFile = jest.fn(async () => ({ canceled: false, data: '{}' }))
+    desktop.openLibraryFile = jest.fn(async () => ({ canceled: false, data: '{}' }))
     excalidraw.loadSceneOrLibraryFromBlob.mockResolvedValue({
       type: excalidraw.MIME_TYPES.excalidraw,
       data: { elements: [] },

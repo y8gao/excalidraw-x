@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml)
 
-**ExcalidrawX** is a desktop application that wraps [Excalidraw](https://excalidraw.com/) in [Electron](https://www.electronjs.org/). You get the same infinite canvas, shapes, collaboration-oriented workflow, and library as the web app, but with a **native menu bar**, **real file paths**, **offline-friendly bundling**, and **OS-integrated** behavior suited to daily use on Windows, macOS, or Linux.
+**ExcalidrawX** is a desktop application that wraps [Excalidraw](https://excalidraw.com/) in [Tauri 2](https://v2.tauri.app/). You get the same infinite canvas, shapes, collaboration-oriented workflow, and library as the web app, but with a **native menu bar**, **real file paths**, **offline-friendly bundling**, and **OS-integrated** behavior suited to daily use on Windows, macOS, or Linux.
 
 Excalidraw itself is an open-source virtual whiteboard. This repository only adds the **desktop shell and integrations** described below; all drawing features come from `@excalidraw/excalidraw`.
 
@@ -23,7 +23,7 @@ Excalidraw itself is an open-source virtual whiteboard. This repository only add
 | **Library** | Dedicated **Library** menu: browse the official libraries site in the **system browser**, **import** / **save** `.excalidrawlib` files, **reset** personal library items (with confirmation), and **toggle** the library sidebar (docked). See [Library menu & cache](#library-menu--cache) below. |
 | **Library cache** | The full library (built-in rows, imports, and unsaved changes) is **persisted automatically** under the app **user data** directory as `library-cache.excalidrawlib` and **restored on the next launch**. Invalid cache files are discarded. This is **per device** (not cloud-synced). |
 | **UX polish** | In-app **hamburger menu** is hidden so actions live in the **native menubar**; **modal dialogs** (reset canvas / reset library / unsaved) support **Escape**, **backdrop click**, and **focus trap**. Opening **libraries.excalidraw.com** from the app uses the **default browser**, not an in-app window. |
-| **Distribution** | From source you can produce **ZIP** packages per platform with **Electron Forge**; optional **Windows code signing**. Details are in the [Development guide](DEVELOPMENT.md). |
+| **Distribution** | From source you can produce **platform installers and bundles** per OS with **Tauri** (`npm run package`); optional code signing per platform. Details are in the [Development guide](DEVELOPMENT.md). |
 | **Quality** | **Jest** and **ESLint** in the repository; the UI bundle includes fonts and assets **without relying on a public CDN** for the app shell. See [Development guide](DEVELOPMENT.md) to run tests and lint. |
 
 ---
@@ -40,13 +40,13 @@ Excalidraw itself is an open-source virtual whiteboard. This repository only add
 | **Reset Library** | Ctrl+Shift+Backspace | ⇧⌘⌫ | After confirmation, removes **personal** library rows; built-in Excalidraw library items stay. |
 | **Toggle Library** | Ctrl+Alt+L | ⌥⌘L | Opens the sidebar, switches to the **Library** tab, and **pins** (docks) it. |
 
-Use **Cmd** instead of **Ctrl** on macOS where the table says Ctrl (Electron uses `CmdOrCtrl` in the menu).
+Use **Cmd** instead of **Ctrl** on macOS where the table says Ctrl (menus use platform-appropriate modifiers).
 
 **Why not Ctrl+Shift+L for import?** In upstream Excalidraw, **Ctrl/Cmd+Shift+L** is reserved for **locking selected elements**. Import uses **Ctrl/Cmd+Shift+O** instead (open file, analogous to **Open** for drawings).
 
 ### Automatic library cache
 
-- **Location:** `{userData}/library-cache.excalidrawlib`, where `{userData}` is Electron’s [app userData path](https://www.electronjs.org/docs/latest/api/app#appgetpathname) for your OS (e.g. `%APPDATA%` on Windows, `~/Library/Application Support/…` on macOS, `~/.config/…` or XDG on Linux).
+- **Location:** `{userData}/excalidraw-x/library-cache.excalidrawlib`, where `{userData}` is the OS application data directory (e.g. `%APPDATA%` on Windows, `~/Library/Application Support` on macOS, XDG config on Linux).
 - **When it updates:** After library changes, writes are **debounced**; the cache is also **flushed when the document becomes hidden** (e.g. switching away or closing) so recent edits are less likely to be lost.
 - **Scope:** One cache file **per install / user profile** on that machine. To copy a library to another computer, use **Save to…** and **Import Library…**, or copy the cache file manually.
 
@@ -54,8 +54,8 @@ Use **Cmd** instead of **Ctrl** on macOS where the table says Ctrl (Electron use
 
 ## Usage
 
-1. **From source:** clone the repository, run `npm install`, then either run **`npm run dev`** (live-reload development) or **`npm run build`** followed by **`npm run prod`** to run a production build locally.
-2. **Packaging:** to create **ZIP** installers or configure signing, see the **[Development guide](DEVELOPMENT.md)**.
+1. **From source:** clone the repository, run `npm install`, then run **`npm run dev`** (webpack dev server + Tauri) or **`npm run dev:web`** for the UI only in a browser.
+2. **Packaging:** to create installers/bundles or configure signing, see the **[Development guide](DEVELOPMENT.md)** (`npm run package`).
 
 ---
 

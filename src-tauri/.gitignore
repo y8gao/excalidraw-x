@@ -1,0 +1,5 @@
+# Cargo / Tauri build output (binaries, bundles, incremental artifacts)
+/target/
+
+# Tauri CLI generated capability schemas (regenerated on build)
+/gen/schemas

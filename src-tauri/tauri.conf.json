@@ -1,0 +1,53 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "ExcalidrawX",
+  "version": "0.2.0",
+  "identifier": "com.excalidraw.excalidrawx",
+  "build": {
+    "frontendDist": "../build",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "webpack serve --mode development",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ExcalidrawX",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../assets/icon.png",
+      "../assets/icon.icns",
+      "../assets/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["excalidraw"],
+        "name": "Excalidraw Drawing",
+        "role": "Editor",
+        "description": "Excalidraw scene",
+        "mimeType": "application/json",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.excalidraw.excalidrawx.excalidraw-document",
+          "conformsTo": ["public.json", "public.data"]
+        }
+      }
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

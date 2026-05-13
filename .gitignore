@@ -1,9 +1,42 @@
+# --- Dependencies ---
 node_modules/
-dist/
+
+# --- Webpack frontend output (regenerate: npm run build) ---
+# Tauri reads ../build in production; keep this directory out of git — it is large and reproducible.
 build/
-*.log
-.DS_Store
+dist/
+
+# --- Tauri / Rust (see also src-tauri/.gitignore) ---
+src-tauri/target/
+
+# --- Legacy Electron Forge unpackaged / make output (unused with Tauri) ---
+out/
+
+# --- Environment & secrets ---
 .env
 .env.local
+.env.*.local
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- IDE ---
 .vscode/
-out/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Test / lint caches ---
+coverage/
+.eslintcache
+
+# --- Misc local scratch ---
+*.local
