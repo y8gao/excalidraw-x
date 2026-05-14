@@ -90,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-${{ matrix.artifact_slug }}-${{ github.ref_name }}
-          path: src-tauri/target/*/bundle/**/*
+          path: src-tauri/target/**/bundle/**/*
           if-no-files-found: error
 
   release:
