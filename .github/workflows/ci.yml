@@ -62,18 +62,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # dtolnay only prepends $CARGO_HOME/bin when it installs rustup; runners that
-      # already ship rustup (e.g. macOS + Homebrew) can leave another `cargo` first
-      # on PATH, which may invoke rustup-init and break `cargo metadata` for Tauri.
-      - name: Prefer rustup-managed Cargo on PATH
-        shell: bash
-        run: |
-          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
-
       - name: Add Rust target (macOS Intel cross-compile)
         if: ${{ matrix.rust_target != '' }}
         run: rustup target add ${{ matrix.rust_target }}
+
+      # macOS runners can ship a broken ~/.cargo/bin/cargo that is rustup-init (see
+      # sanity-check: `cargo --version` prints rustup-init). Prepend the real stable
+      # toolchain bin from `rustup which` so Tauri runs a real cargo. Second line is
+      # prepended first on PATH, so toolchain wins over $CARGO_HOME/bin.
+      - name: Put stable toolchain cargo before ~/.cargo/bin shims
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          tc_bin="$(dirname "$(rustup +stable which cargo)")"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          echo "${tc_bin}" >> "$GITHUB_PATH"
 
       - name: Install Linux system dependencies (Tauri / WebKitGTK)
         if: runner.os == 'Linux'
@@ -85,12 +89,17 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Sanity-check Cargo resolves to rustup proxy
+      - name: Sanity-check Cargo is real toolchain binary
         shell: bash
         run: |
           set -euo pipefail
           command -v cargo
-          cargo --version
+          ver="$(cargo --version 2>&1)"
+          echo "$ver"
+          if echo "$ver" | grep -qi 'rustup-init'; then
+            echo "ERROR: cargo is still rustup-init, not the stable toolchain cargo"
+            exit 1
+          fi
           cargo metadata --format-version 1 --manifest-path src-tauri/Cargo.toml --no-deps > /dev/null
 
       - uses: actions/setup-node@v4
