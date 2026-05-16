@@ -415,6 +415,10 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: &tauri::menu::Me
       // No set_parent: on macOS, attaching to the parent window creates a
       // sheet dialog (beginSheetModalForWindow + semaphore) whose nested
       // event loop conflicts with Tauri's, causing a hang when dismissed.
+      // OkCancelCustom returns Custom(text) for both buttons on all platforms.
+      // The "common-controls-v6" feature (enabled in Cargo.toml) is required on
+      // Windows so TaskDialog respects the custom label instead of falling back
+      // to MessageBox (which ignores custom text and shows plain OK/Cancel).
       let result = rfd::MessageDialog::new()
         .set_title(&title)
         .set_description(&detail)
