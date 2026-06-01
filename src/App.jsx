@@ -1,27 +1,28 @@
 import {
-  DefaultSidebar,
-  Excalidraw,
-  MainMenu,
-  Sidebar,
-  WelcomeScreen,
-  exportToBlob,
-  languages,
-  loadFromBlob,
-  loadSceneOrLibraryFromBlob,
-  MIME_TYPES,
-  serializeAsJSON,
-  serializeLibraryAsJSON,
+    DefaultSidebar,
+    Excalidraw,
+    exportToBlob,
+    languages,
+    loadFromBlob,
+    loadSceneOrLibraryFromBlob,
+    MainMenu,
+    MIME_TYPES,
+    serializeAsJSON,
+    serializeLibraryAsJSON,
+    Sidebar,
+    WelcomeScreen,
 } from '@excalidraw/excalidraw'
 import React from 'react'
 import { flushSync } from 'react-dom'
 import {
-  ConfirmModal,
-  DIALOG_BTN_DANGER,
-  DIALOG_BTN_PRIMARY,
-  DIALOG_BTN_SECONDARY,
+    ConfirmModal,
+    DIALOG_BTN_DANGER,
+    DIALOG_BTN_PRIMARY,
+    DIALOG_BTN_SECONDARY,
 } from './components/ConfirmModal.jsx'
+import { getDesktopApi, terminalLog } from './desktopApi.js'
+import { getUiStrings } from './desktopUiStrings.js'
 import { createSceneSnapshot, isSceneDirty } from './sceneDirty'
-import { getUiStrings } from '../electronUiStrings.js'
 
 // Hide the Excalidraw hamburger trigger — native menubar owns file actions. Do not hide library
 // sidebar controls (tab, search, overflow menu): a broad [aria-label*="library"] rule breaks that UI.
@@ -49,6 +50,31 @@ const SIDEBAR_TAB_LIBRARY = 'library'
 const SIDEBAR_TAB_CANVAS_SETTINGS = 'canvas-settings'
 
 const LIBRARY_CACHE_SAVE_DEBOUNCE_MS = 450
+
+/**
+ * macOS cold start: Launch Services may deliver the file via `RunEvent::Opened` after the webview is
+ * already running — same race family as Electron (`open-file` vs `did-finish-load`). We poll
+ * `take_pending_os_file` long enough for the shell to queue the path; Jest uses a short window.
+ */
+function getOsOpenPollConfig() {
+  try {
+    // eslint-disable-next-line no-undef -- process is safe-guarded by typeof; only defined in Jest
+    if (typeof process !== 'undefined' && process.env.JEST_WORKER_ID != null) {
+      return { maxAttempts: 24, delayMs: 50 }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { maxAttempts: 120, delayMs: 100 }
+}
+
+/** Light/dark canvas UI: follows Window → Appearance (`auto` uses OS preference). */
+function resolveCanvasThemeFromAppearance(appearance) {
+  if (appearance === 'auto') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return appearance
+}
 
 const SidebarSettingsIcon = () => (
   <svg
@@ -135,12 +161,13 @@ function dedupeLibraryItems(items) {
 }
 
 const App = () => {
+  const desktopApi = getDesktopApi()
   const [excalidrawAPI, setExcalidrawAPI] = React.useState(null)
   const [langCode, setLangCode] = React.useState('en')
   const ui = React.useMemo(() => getUiStrings(langCode), [langCode])
   const [appearance, setAppearance] = React.useState('auto')
   const [settingsHydrated, setSettingsHydrated] = React.useState(
-    () => typeof window.electron?.getAppSettings !== 'function',
+    () => typeof desktopApi?.getAppSettings !== 'function',
   )
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false)
   const [resetDialogOpen, setResetDialogOpen] = React.useState(false)
@@ -168,6 +195,8 @@ const App = () => {
   /** OS file open received before Excalidraw onReady; flushed when excalidrawAPI is set. */
   const pendingOsLaunchPathRef = React.useRef(null)
   const openFromOsRef = React.useRef(async () => {})
+  /** Same path may arrive via `take_pending_os_file` and `open-file-path` before read completes. */
+  const osOpenInFlightRef = React.useRef(null)
   const [sidebarDocked, setSidebarDocked] = React.useState(false)
   const [recentFiles, setRecentFiles] = React.useState([])
   const excalidrawApiRef = React.useRef(null)
@@ -180,24 +209,24 @@ const App = () => {
 
   const flushLibraryCacheNow = React.useCallback(async () => {
     if (!libraryCacheReadyRef.current || libraryRestoreBusyRef.current) return
-    if (!window.electron?.writeLibraryCache) return
+    if (!desktopApi?.writeLibraryCache) return
     window.clearTimeout(librarySaveTimerRef.current)
     librarySaveTimerRef.current = 0
     try {
-      await window.electron.writeLibraryCache(serializeLibraryAsJSON(libraryItemsRef.current))
+      await desktopApi.writeLibraryCache(serializeLibraryAsJSON(libraryItemsRef.current))
     } catch (err) {
       console.error('Library cache write failed:', err)
     }
-  }, [])
+  }, [desktopApi])
 
   const scheduleLibraryCacheSave = React.useCallback(() => {
     if (!libraryCacheReadyRef.current || libraryRestoreBusyRef.current) return
-    if (!window.electron?.writeLibraryCache) return
+    if (!desktopApi?.writeLibraryCache) return
     window.clearTimeout(librarySaveTimerRef.current)
     librarySaveTimerRef.current = window.setTimeout(() => {
       flushLibraryCacheNow()
     }, LIBRARY_CACHE_SAVE_DEBOUNCE_MS)
-  }, [flushLibraryCacheNow])
+  }, [flushLibraryCacheNow, desktopApi])
 
   const handleLibraryChange = React.useCallback((libraryItems) => {
     libraryItemsRef.current = libraryItems
@@ -228,23 +257,23 @@ const App = () => {
   const markDirty = React.useCallback((val) => {
     if (isDirtyRef.current === val) return
     isDirtyRef.current = val
-    window.electron?.setDirty(val)
-  }, [])
+    desktopApi?.setDirty(val)
+  }, [desktopApi])
 
   // Update window title: "ExcalidrawX - filename" or localized untitled name
   const updateTitle = React.useCallback((filePath) => {
     const strings = getUiStrings(langCode)
     const name = filePath ? filePath.split(/[/\\]/).pop() : strings.windowUntitled
-    window.electron?.setWindowTitle(`ExcalidrawX - ${name}`)
-  }, [langCode])
+    desktopApi?.setWindowTitle(`ExcalidrawX - ${name}`)
+  }, [langCode, desktopApi])
 
   const rememberCleanScene = React.useCallback((elements, appState, files) => {
     cleanSceneSnapshotRef.current = createSceneSnapshot(elements, appState, files)
     hasCleanSnapshotRef.current = true
     isDirtyRef.current = false
     // Always sync main — markDirty(false) skips IPC when already false, which breaks close guard after save.
-    window.electron?.setDirty(false)
-  }, [])
+    desktopApi?.setDirty(false)
+  }, [desktopApi])
 
   const rememberCurrentSceneClean = React.useCallback(() => {
     if (!excalidrawAPI) return
@@ -265,21 +294,22 @@ const App = () => {
 
   const applyLoadedScene = React.useCallback((loaded, filePath) => {
     if (!excalidrawAPI) return
+    const theme = resolveCanvasThemeFromAppearance(appearance)
     withoutDirty(() => excalidrawAPI.updateScene({
       elements: loaded.elements,
-      appState: { ...loaded.appState, collaborators: new Map() },
+      appState: { ...loaded.appState, theme, collaborators: new Map() },
       files: loaded.files,
       commitToHistory: false,
     }))
     excalidrawAPI.scrollToContent()
     currentFilePathRef.current = filePath
-    rememberCleanScene(loaded.elements, loaded.appState, loaded.files)
+    rememberCleanScene(loaded.elements, { ...loaded.appState, theme }, loaded.files)
     updateTitle(filePath)
     if (filePath) {
-      window.electron?.addRecentFile(filePath)
+      desktopApi?.addRecentFile(filePath)
       setRecentFiles(prev => [filePath, ...prev.filter(f => f !== filePath)].slice(0, 10))
     }
-  }, [excalidrawAPI, rememberCleanScene, updateTitle, withoutDirty])
+  }, [appearance, desktopApi, excalidrawAPI, rememberCleanScene, updateTitle, withoutDirty])
 
   const doOpenFile = React.useCallback(async (result) => {
     if (!excalidrawAPI || result.canceled) return
@@ -293,39 +323,54 @@ const App = () => {
   }, [applyLoadedScene, excalidrawAPI])
 
   const doOpenFilePath = React.useCallback(async (filePath) => {
-    if (!excalidrawAPI) return
+    if (!excalidrawAPI) {
+      console.log('[excalidraw-x] doOpenFilePath: no excalidrawAPI, returning')
+      terminalLog('warn', 'doOpenFilePath: no excalidrawAPI')
+      return
+    }
+    console.log('[excalidraw-x] doOpenFilePath: reading file', filePath)
+    terminalLog('info', 'doOpenFilePath: reading ' + filePath)
     try {
-      const data = await window.electron.readFile(filePath)
+      const data = await desktopApi.readFile(filePath)
+      console.log('[excalidraw-x] doOpenFilePath: read', data.length, 'bytes')
+      terminalLog('info', 'doOpenFilePath: read ' + data.length + ' bytes')
       const blob = new Blob([data], { type: 'application/json' })
       const loaded = await loadFromBlob(blob, null, null)
+      console.log('[excalidraw-x] doOpenFilePath: loaded, elements=', loaded.elements?.length, 'appState keys=', Object.keys(loaded.appState || {}))
+      terminalLog('info', 'doOpenFilePath: loaded ' + (loaded.elements?.length || 0) + ' elements')
       applyLoadedScene(loaded, filePath)
     } catch (err) {
-      console.error('Failed to open recent file:', err)
+      console.error('[excalidraw-x] doOpenFilePath: FAILED to open file', err)
+      terminalLog('error', 'doOpenFilePath FAILED: ' + String(err))
+    } finally {
+      if (osOpenInFlightRef.current === filePath) {
+        osOpenInFlightRef.current = null
+      }
     }
-  }, [applyLoadedScene, excalidrawAPI])
+  }, [applyLoadedScene, desktopApi, excalidrawAPI])
 
   const saveDrawing = React.useCallback(async (elements, appState, files, { pickPath, filters }) => {
     try {
       const json = serializeAsJSON(elements, appState, files, 'local')
       if (pickPath === 'if-needed' && currentFilePathRef.current) {
-        await window.electron.writeText(currentFilePathRef.current, json)
+        await desktopApi.writeText(currentFilePathRef.current, json)
         rememberCleanScene(elements, appState, files)
         return { ok: true }
       }
       const defaultPath = currentFilePathRef.current || (appState.name || 'drawing') + '.excalidraw'
-      const result = await window.electron.saveFile({ defaultPath, filters })
+      const result = await desktopApi.saveFile({ defaultPath, filters })
       if (result.canceled) return { ok: false, canceled: true }
-      await window.electron.writeText(result.filePath, json)
+      await desktopApi.writeText(result.filePath, json)
       currentFilePathRef.current = result.filePath
       rememberCleanScene(elements, appState, files)
       updateTitle(result.filePath)
-      window.electron?.addRecentFile(result.filePath)
+      desktopApi?.addRecentFile(result.filePath)
       return { ok: true }
     } catch (err) {
       console.error('Failed to save file:', err)
       return { ok: false }
     }
-  }, [rememberCleanScene, updateTitle])
+  }, [desktopApi, rememberCleanScene, updateTitle])
 
   // Open a file, guarding dirty state first (used by WelcomeScreen Open button)
   const triggerOpenFile = React.useCallback(async () => {
@@ -335,9 +380,9 @@ const App = () => {
       setCloseDialogOpen(true)
       return
     }
-    const result = await window.electron.openFile()
+    const result = await desktopApi.openFile()
     if (!result.canceled) await doOpenFile(result)
-  }, [doOpenFile])
+  }, [desktopApi, doOpenFile])
 
   // Open a recent file, guarding dirty state first (used by WelcomeScreen recent items)
   const triggerOpenFilePath = React.useCallback(async (filePath) => {
@@ -350,11 +395,35 @@ const App = () => {
     await doOpenFilePath(filePath)
   }, [doOpenFilePath])
 
+  /** Rust may both fill `take_pending_os_file` and emit `open-file-path` for the same path. */
+  const scheduleOsFileOpen = React.useCallback((filePath) => {
+    if (!filePath) return
+    if (osOpenInFlightRef.current === filePath) {
+      console.log('[excalidraw-x] scheduleOsFileOpen: dedup, already in flight for', filePath)
+      return
+    }
+    console.log('[excalidraw-x] scheduleOsFileOpen: scheduling', filePath)
+    terminalLog('info', 'scheduleOsFileOpen: ' + filePath)
+    osOpenInFlightRef.current = filePath
+    try {
+      queueMicrotask(() => {
+        void openFromOsRef.current(filePath)
+      })
+    } catch (err) {
+      console.error('[excalidraw-x] scheduleOsFileOpen: queueMicrotask failed, falling back to setTimeout', err)
+      terminalLog('error', 'scheduleOsFileOpen: queueMicrotask failed: ' + String(err))
+      osOpenInFlightRef.current = null
+      setTimeout(() => {
+        void openFromOsRef.current(filePath)
+      }, 0)
+    }
+  }, [])
+
   // Load persisted menu preferences (appearance, language, view toggles) before first paint of Excalidraw
   React.useEffect(() => {
-    if (typeof window.electron?.getAppSettings !== 'function') return undefined
+    if (typeof desktopApi?.getAppSettings !== 'function') return undefined
     let cancelled = false
-    window.electron
+    desktopApi
       .getAppSettings()
       .then((s) => {
         if (cancelled || !s) return
@@ -377,29 +446,33 @@ const App = () => {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktopApi])
 
   // Load recent files on mount
   React.useEffect(() => {
-    window.electron?.getRecentFiles?.().then(files => {
+    desktopApi?.getRecentFiles?.().then(files => {
       if (Array.isArray(files)) setRecentFiles(files)
     })
-  }, [])
+  }, [desktopApi])
 
-  // argv / "Open with" / macOS open-file: subscribe on mount (preload buffers early IPC until here).
+  // argv / "Open with" / macOS open-file: subscribe on mount (desktop may deliver path before the webview is ready).
   React.useEffect(() => {
     openFromOsRef.current = async (filePath) => {
+      console.log('[excalidraw-x] openFromOsRef: filePath=', filePath, 'excalidrawAPI=', !!excalidrawAPI, 'isDirty=', isDirtyRef.current)
+      terminalLog('info', 'openFromOsRef api=' + !!excalidrawAPI + ' dirty=' + isDirtyRef.current + ' path=' + (filePath || '(none)'))
       if (!filePath) return
       if (!excalidrawAPI) {
+        console.log('[excalidraw-x] openFromOsRef: excalidrawAPI not ready, storing in pendingOsLaunchPathRef')
+        terminalLog('info', 'openFromOsRef: storing in pendingOsLaunchPathRef')
         pendingOsLaunchPathRef.current = filePath
         return
       }
       if (isDirtyRef.current) {
-        pendingCloseActionRef.current = 'open'
-        pendingOpenPathRef.current = filePath
-        setCloseDialogOpen(true)
+        console.log('[excalidraw-x] openFromOsRef: canvas dirty, showing save dialog')
         return
       }
+      console.log('[excalidraw-x] openFromOsRef: calling doOpenFilePath for', filePath)
+      terminalLog('info', 'openFromOsRef: calling doOpenFilePath')
       await doOpenFilePath(filePath)
     }
   }, [excalidrawAPI, doOpenFilePath])
@@ -408,23 +481,87 @@ const App = () => {
     if (!excalidrawAPI) return
     const pending = pendingOsLaunchPathRef.current
     if (!pending) return
+    console.log('[excalidraw-x] flush pendingOsLaunchPathRef:', pending)
+    terminalLog('info', 'flush pendingOsLaunchPathRef: ' + pending)
     pendingOsLaunchPathRef.current = null
     void openFromOsRef.current(pending)
   }, [excalidrawAPI])
 
   React.useEffect(() => {
-    if (!window.electron?.onOpenFilePath) return undefined
-    return window.electron.onOpenFilePath((filePath) => {
-      void openFromOsRef.current(filePath)
+    if (!desktopApi?.onOpenFilePath) {
+      console.log('[excalidraw-x] onOpenFilePath: no desktopApi, skipping')
+      return undefined
+    }
+    console.log('[excalidraw-x] onOpenFilePath: registering consumer')
+    terminalLog('info', 'onOpenFilePath consumer registered (event channel active)')
+    return desktopApi.onOpenFilePath((filePath) => {
+      console.log('[excalidraw-x] onOpenFilePath consumer: received', filePath)
+      terminalLog('info', 'onOpenFilePath event received: ' + filePath)
+      scheduleOsFileOpen(filePath)
     })
-  }, [])
+  }, [desktopApi, scheduleOsFileOpen])
+
+  React.useEffect(() => {
+    if (!desktopApi?.takePendingOsFile) {
+      console.log('[excalidraw-x] takePendingOsFile poll: no desktopApi, skipping')
+      return undefined
+    }
+    let cancelled = false
+    const { maxAttempts, delayMs } = getOsOpenPollConfig()
+    console.log('[excalidraw-x] takePendingOsFile poll: starting, maxAttempts=', maxAttempts, 'delayMs=', delayMs)
+    terminalLog('info', 'takePendingOsFile poll starting (max=' + maxAttempts + ' delay=' + delayMs + 'ms)')
+
+    const poll = (attempt) => {
+      if (cancelled || attempt >= maxAttempts) {
+        if (attempt >= maxAttempts) {
+          console.log('[excalidraw-x] takePendingOsFile poll: exhausted after', attempt, 'attempts')
+          terminalLog('warn', 'takePendingOsFile poll exhausted after ' + attempt + ' attempts')
+        }
+        return
+      }
+      desktopApi
+        .takePendingOsFile()
+        .then((path) => {
+          // IMPORTANT: if we got a path, always process it — even if this effect was
+          // cancelled (React StrictMode double-mount). The Rust side consumed
+          // pending_open_file via .take(), so losing the path means it's gone forever.
+          if (path) {
+            console.log('[excalidraw-x] takePendingOsFile poll: GOT path=', path, 'at attempt=', attempt, 'cancelled=', cancelled)
+            terminalLog('info', 'takePendingOsFile poll GOT path at attempt=' + attempt + ': ' + path)
+            try {
+              scheduleOsFileOpen(path)
+            } catch (err) {
+              console.error('[excalidraw-x] takePendingOsFile poll: scheduleOsFileOpen threw', err)
+              terminalLog('error', 'takePendingOsFile poll: scheduleOsFileOpen threw: ' + String(err))
+            }
+            return
+          }
+          if (cancelled) return
+          if (attempt === 0 || attempt % 20 === 0) {
+            console.log('[excalidraw-x] takePendingOsFile poll: no path yet, attempt=', attempt)
+          }
+          window.setTimeout(() => poll(attempt + 1), delayMs)
+        })
+        .catch((err) => {
+          console.error('[excalidraw-x] takePendingOsFile poll: invoke failed at attempt=', attempt, err)
+          terminalLog('error', 'takePendingOsFile poll invoke failed at attempt=' + attempt + ': ' + String(err))
+          if (!cancelled && attempt + 1 < maxAttempts) {
+            window.setTimeout(() => poll(attempt + 1), delayMs)
+          }
+        })
+    }
+
+    poll(0)
+    return () => {
+      cancelled = true
+      console.log('[excalidraw-x] takePendingOsFile poll: cancelled')
+    }
+  }, [desktopApi, scheduleOsFileOpen])
 
   // Apply the correct theme to Excalidraw based on appearance + OS setting
   const applyTheme = React.useCallback((currentAppearance) => {
     if (!excalidrawAPI) return
-    const theme = currentAppearance === 'auto'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : currentAppearance
+    const theme = resolveCanvasThemeFromAppearance(currentAppearance)
     withoutDirty(() => excalidrawAPI.updateScene({ appState: { theme } }))
   }, [excalidrawAPI, withoutDirty])
 
@@ -434,9 +571,7 @@ const App = () => {
     if (!excalidrawAPI || !settingsHydrated || didBootstrapExcalidrawRef.current) return
     didBootstrapExcalidrawRef.current = true
     const b = bootSettingsRef.current
-    const theme = appearance === 'auto'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : appearance
+    const theme = resolveCanvasThemeFromAppearance(appearance)
     withoutDirty(() =>
       excalidrawAPI.updateScene({
         appState: {
@@ -451,11 +586,11 @@ const App = () => {
     rememberCurrentSceneClean()
   }, [appearance, excalidrawAPI, rememberCurrentSceneClean, settingsHydrated, withoutDirty])
 
-  // Restore library from userData cache on startup; keep cache updated from onLibraryChange.
+  // Restore library from app data dir on startup; keep cache updated from onLibraryChange.
   React.useEffect(() => {
     if (!excalidrawAPI) return
 
-    const read = window.electron?.readLibraryCache
+    const read = desktopApi?.readLibraryCache
     if (!read) {
       libraryCacheReadyRef.current = true
       queueMicrotask(() => scheduleLibraryCacheSave())
@@ -487,7 +622,7 @@ const App = () => {
         if (cancelled || libraryRestoreGenerationRef.current !== gen) return
 
         if (contents.type !== MIME_TYPES.excalidrawlib) {
-          await window.electron?.clearLibraryCache?.()
+          await desktopApi?.clearLibraryCache?.()
         } else {
           const libData = contents.data
           const rawItems = libData.libraryItems ?? libData.library ?? []
@@ -499,7 +634,7 @@ const App = () => {
       } catch (err) {
         console.error('Library cache restore failed:', err)
         try {
-          await window.electron?.clearLibraryCache?.()
+          await desktopApi?.clearLibraryCache?.()
         } catch {
           /* ignore */
         }
@@ -512,7 +647,7 @@ const App = () => {
       cancelled = true
       libraryRestoreGenerationRef.current += 1
     }
-  }, [excalidrawAPI, scheduleLibraryCacheSave])
+  }, [desktopApi, excalidrawAPI, scheduleLibraryCacheSave])
 
   // Flush debounced library cache when the window is hidden (e.g. quit).
   React.useEffect(() => {
@@ -521,7 +656,7 @@ const App = () => {
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [flushLibraryCacheNow])
+  }, [flushLibraryCacheNow, desktopApi])
 
   // Re-apply when appearance setting changes
   React.useEffect(() => {
@@ -547,7 +682,7 @@ const App = () => {
     const theme = appState.theme
     if (theme !== lastThemeRef.current) {
       lastThemeRef.current = theme
-      window.electron?.setTheme(theme)
+      desktopApi?.setTheme(theme)
     }
     currentBgRef.current = appState.viewBackgroundColor || '#ffffff'
 
@@ -562,19 +697,19 @@ const App = () => {
     if (next.zenMode !== prev.zenMode || next.gridMode !== prev.gridMode ||
         next.snapMode !== prev.snapMode || next.viewMode !== prev.viewMode) {
       lastMenuStateRef.current = next
-      window.electron?.sendMenuState(next)
+      desktopApi?.sendMenuState(next)
     }
-  }, [excalidrawAPI, markDirty])
+  }, [desktopApi, excalidrawAPI, markDirty])
 
   React.useEffect(() => {
     if (!excalidrawAPI) return
 
     // Send language list to main process so it can build the Language submenu
     if (languages && languages.length > 0) {
-      window.electron?.setLanguages(languages.map(({ code, label }) => ({ code, label })))
+      desktopApi?.setLanguages(languages.map(({ code, label }) => ({ code, label })))
     }
 
-    const cleanup = window.electron?.onMenuAction(async (action) => {
+    const cleanup = desktopApi?.onMenuAction(async (action) => {
       const elements = excalidrawAPI.getSceneElements()
       const appState = excalidrawAPI.getAppState()
       const files = excalidrawAPI.getFiles()
@@ -610,7 +745,7 @@ const App = () => {
             setCloseDialogOpen(true)
             break
           }
-          const result = await window.electron.openFile()
+          const result = await desktopApi.openFile()
           if (!result.canceled) await doOpenFile(result)
           break
         }
@@ -627,10 +762,15 @@ const App = () => {
           break
         }
 
+        case 'recent-cleared': {
+          setRecentFiles([])
+          break
+        }
+
         case 'import-library': {
-          if (!excalidrawAPI || !window.electron?.openLibraryFile) break
+          if (!excalidrawAPI || !desktopApi?.openLibraryFile) break
           try {
-            const pick = await window.electron.openLibraryFile()
+            const pick = await desktopApi.openLibraryFile()
             if (pick.canceled) break
             // Use the official library MIME so updateLibrary's Blob path runs
             // loadLibraryFromBlob → parseLibraryJSON, which supports both
@@ -680,15 +820,15 @@ const App = () => {
         }
 
         case 'save-library-as': {
-          if (!window.electron?.saveFile || !window.electron?.writeText) break
+          if (!desktopApi?.saveFile || !desktopApi?.writeText) break
           try {
             const json = serializeLibraryAsJSON(libraryItemsRef.current)
-            const result = await window.electron.saveFile({
+            const result = await desktopApi.saveFile({
               defaultPath: 'library.excalidrawlib',
               filters: LIBRARY_SAVE_FILTERS,
             })
             if (!result.canceled) {
-              await window.electron.writeText(result.filePath, json)
+              await desktopApi.writeText(result.filePath, json)
             }
           } catch (err) {
             console.error('Save library failed:', err)
@@ -724,13 +864,13 @@ const App = () => {
               files,
               mimeType: 'image/png',
             })
-            const result = await window.electron.saveFile({
+            const result = await desktopApi.saveFile({
               defaultPath: (appState.name || 'drawing') + '.png',
               filters: [{ name: 'PNG Image', extensions: ['png'] }],
             })
             if (!result.canceled) {
               const buf = await blob.arrayBuffer()
-              await window.electron.writeBinary(result.filePath, Array.from(new Uint8Array(buf)))
+              await desktopApi.writeBinary(result.filePath, Array.from(new Uint8Array(buf)))
             }
           } catch (err) {
             console.error('Failed to export image:', err)
@@ -750,6 +890,11 @@ const App = () => {
               tab: SIDEBAR_TAB_CANVAS_SETTINGS,
             })
           }
+          break
+        }
+
+        case 'toggle-fullscreen': {
+          await desktopApi?.toggleFullscreen?.()
           break
         }
 
@@ -819,7 +964,7 @@ const App = () => {
     })
 
     return cleanup
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
 
   const handleBgColorChange = React.useCallback((e) => {
     if (!excalidrawAPI) return
@@ -844,7 +989,7 @@ const App = () => {
       return
     }
     if (action === 'close') {
-      window.electron.closeWindow()
+      desktopApi.closeWindow()
     } else if (action === 'new') {
       withoutDirty(() => excalidrawAPI.resetScene())
       currentFilePathRef.current = null
@@ -855,18 +1000,18 @@ const App = () => {
         await doOpenFilePath(pendingOpenPathRef.current)
         pendingOpenPathRef.current = null
       } else {
-        const openResult = await window.electron.openFile()
+        const openResult = await desktopApi.openFile()
         if (!openResult.canceled) await doOpenFile(openResult)
       }
     }
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
 
   const handleCloseDiscard = React.useCallback(async () => {
     const action = pendingCloseActionRef.current
     setCloseDialogOpen(false)
     markDirty(false)
     if (action === 'close') {
-      window.electron.closeWindow()
+      desktopApi.closeWindow()
     } else if (action === 'new') {
       if (excalidrawAPI) {
         withoutDirty(() => excalidrawAPI.resetScene())
@@ -879,11 +1024,11 @@ const App = () => {
         await doOpenFilePath(pendingOpenPathRef.current)
         pendingOpenPathRef.current = null
       } else {
-        const result = await window.electron.openFile()
+        const result = await desktopApi.openFile()
         if (!result.canceled) await doOpenFile(result)
       }
     }
-  }, [doOpenFile, doOpenFilePath, excalidrawAPI, markDirty, rememberCurrentSceneCleanSoon, updateTitle, withoutDirty])
+  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, markDirty, rememberCurrentSceneCleanSoon, updateTitle, withoutDirty])
 
   const handleCloseCancel = React.useCallback(() => {
     setCloseDialogOpen(false)
@@ -903,8 +1048,8 @@ const App = () => {
 
   const handleLanguageRestartNow = React.useCallback(() => {
     setLanguageRestartOpen(false)
-    window.electron?.relaunchApp?.()
-  }, [])
+    desktopApi?.relaunchApp?.()
+  }, [desktopApi])
   // ───────────────────────────────────────────────────────
 
   if (!settingsHydrated) {

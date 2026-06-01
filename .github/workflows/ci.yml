@@ -1,6 +1,5 @@
 name: CI
 
-# Must match `packagerConfig.name` in forge.config.js (Forge ZIP / app bundle name).
 env:
   PACKAGE_ARTIFACT_PREFIX: ExcalidrawX
 
@@ -11,7 +10,6 @@ on:
       - "*"
   pull_request:
     branches: [main, master]
-  # Actions → CI → Run workflow：手动跑完整 Forge 矩阵（ZIP + Windows MSI），不打 tag。
   workflow_dispatch:
 
 jobs:
@@ -34,7 +32,7 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Production build
+      - name: Production build (webpack)
         run: npm run build
 
   package:
@@ -45,23 +43,64 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            make_cmd: npm run make
+            package_cmd: npm run package
             artifact_slug: linux-x64
           - os: windows-latest
-            make_cmd: npm run make
+            package_cmd: npm run package
             artifact_slug: win32-x64
-          # Apple Silicon (host arch on macos-latest)
           - os: macos-latest
-            make_cmd: npm run make
+            package_cmd: npm run package
             artifact_slug: darwin-arm64
-          # Intel Mac — Forge targets x64 from the arm64 runner
           - os: macos-latest
-            make_cmd: npm run make:mac-x64
+            package_cmd: npm run package:x64
             artifact_slug: darwin-x64
+            rust_target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target (macOS Intel cross-compile)
+        if: ${{ matrix.rust_target != '' }}
+        run: rustup target add ${{ matrix.rust_target }}
+
+      # macOS runners can ship a broken ~/.cargo/bin/cargo that is rustup-init (see
+      # sanity-check: `cargo --version` prints rustup-init). Prepend the real stable
+      # toolchain bin from `rustup which` so Tauri runs a real cargo. Second line is
+      # prepended first on PATH, so toolchain wins over $CARGO_HOME/bin.
+      - name: Put stable toolchain cargo before ~/.cargo/bin shims
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          tc_bin="$(dirname "$(rustup +stable which cargo)")"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          echo "${tc_bin}" >> "$GITHUB_PATH"
+
+      - name: Install Linux system dependencies (Tauri / WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Sanity-check Cargo is real toolchain binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cargo
+          ver="$(cargo --version 2>&1)"
+          echo "$ver"
+          if echo "$ver" | grep -qi 'rustup-init'; then
+            echo "ERROR: cargo is still rustup-init, not the stable toolchain cargo"
+            exit 1
+          fi
+          cargo metadata --format-version 1 --manifest-path src-tauri/Cargo.toml --no-deps > /dev/null
 
       - uses: actions/setup-node@v4
         with:
@@ -71,59 +110,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Make distributables (ZIP)
-        run: ${{ matrix.make_cmd }}
+      - name: Build installer(s) (Tauri)
+        run: ${{ matrix.package_cmd }}
 
-      # Locator lives at .github/scripts/ci-locate-forge-zip.js (Node, not bash — macOS bash 3.2; Windows shell differs).
-      - name: Locate Forge-built ZIP
-        id: forge_zip
-        env:
-          ZIP_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
-        run: node .github/scripts/ci-locate-forge-zip.js
-
-      - name: Canonicalize ZIP filename for release
-        id: release_zip
-        env:
-          FORGE_ZIP_PATH: ${{ steps.forge_zip.outputs.path }}
-          ARTIFACT_SLUG: ${{ matrix.artifact_slug }}
-          ZIP_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
-        run: node .github/scripts/ci-canonicalize-zip.js
+      # Only stage top-level installers. Uploading the full bundle tree duplicates
+      # basenames (e.g. Info.plist, copyright, app) across platforms and breaks
+      # softprops/action-gh-release (GitHub release assets require unique names).
+      - name: Stage installers for artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-upload
+          find src-tauri/target -path '*/bundle/dmg/*' -name '*.dmg' -type f -exec cp -f {} dist-upload/ \;
+          find src-tauri/target -path '*/bundle/nsis/*' -name '*.exe' -type f -exec cp -f {} dist-upload/ \;
+          find src-tauri/target -path '*/bundle/msi/*' -name '*.msi' -type f -exec cp -f {} dist-upload/ \;
+          find src-tauri/target -path '*/bundle/deb/*' -name '*.deb' -type f -exec cp -f {} dist-upload/ \;
+          find src-tauri/target -path '*/bundle/rpm/*' -name '*.rpm' -type f -exec cp -f {} dist-upload/ \;
+          find src-tauri/target -path '*/bundle/appimage/*' -name '*.AppImage' -type f -exec cp -f {} dist-upload/ \;
+          echo "Staged installers:"
+          ls -la dist-upload
+          test "$(find dist-upload -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" -ge 1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.release_zip.outputs.stem }}
-          path: ${{ steps.release_zip.outputs.path }}
+          name: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-${{ matrix.artifact_slug }}-${{ github.ref_name }}
+          path: dist-upload
           if-no-files-found: error
 
-      - name: Locate Forge-built MSI (Windows)
-        if: runner.os == 'Windows'
-        id: forge_msi
-        env:
-          MSI_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
-        run: node .github/scripts/ci-locate-forge-msi.js
-
-      # WiX emits ExcalidrawX.msi; upload-artifact used stem "ExcalidrawX", which does not match
-      # download-artifact pattern "ExcalidrawX-*", so the MSI never reached the release job.
-      # Canonical name + artifact "…-msi" matches the pattern and avoids clashing with the ZIP artifact.
-      - name: Canonicalize MSI filename for release
-        if: runner.os == 'Windows'
-        id: release_msi
-        env:
-          FORGE_MSI_PATH: ${{ steps.forge_msi.outputs.path }}
-          ARTIFACT_SLUG: ${{ matrix.artifact_slug }}
-          MSI_PREFIX: ${{ env.PACKAGE_ARTIFACT_PREFIX }}
-        run: node .github/scripts/ci-canonicalize-msi.js
-
-      - name: Upload MSI installer
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          # Must differ from ZIP artifact name (same stem) to avoid upload-artifact v4 409 in one job.
-          name: ${{ steps.release_msi.outputs.stem }}-msi
-          path: ${{ steps.release_msi.outputs.path }}
-          if-no-files-found: error
-
-  # Attach ZIPs from all matrix legs to a GitHub Release for the tag (public download).
   release:
     if: github.ref_type == 'tag'
     needs: package
@@ -135,7 +148,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          # ZIP: ExcalidrawX-<platform>-<version>; MSI artifact: same stem + "-msi" suffix.
           pattern: ${{ env.PACKAGE_ARTIFACT_PREFIX }}-*
           merge-multiple: true
 
@@ -146,7 +158,11 @@ jobs:
           name: Excalidraw X ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            release-assets/**/*.zip
+            release-assets/**/*.dmg
+            release-assets/**/*.exe
             release-assets/**/*.msi
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/**/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

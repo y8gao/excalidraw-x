@@ -8,6 +8,7 @@ This document is for **contributors and maintainers**: environment setup, script
 
 - **Node.js** (LTS recommended)
 - **npm** (or another compatible client)
+- **Rust** (stable) and platform build prerequisites for [Tauri 2](https://v2.tauri.app/start/prerequisites/) when running `tauri dev` / `tauri build`
 
 ---
 
@@ -21,30 +22,37 @@ npm install
 
 ### Development
 
-Runs the webpack dev server (port **3000**) and Electron together:
+Runs the webpack dev server (port **3000**) and the Tauri shell with HMR:
 
 ```bash
 npm run dev
 ```
 
-### Production bundle (local run)
+To run only the web UI in a browser (no desktop shell):
+
+```bash
+npm run dev:web
+```
+
+### Production bundle (webpack only)
 
 ```bash
 npm run build
-npm run prod
 ```
 
-### Package & distributable ZIP
+The desktop app loads the static output from `build/` (see `src-tauri/tauri.conf.json` `frontendDist`).
+
+### Package installers / bundles
 
 ```bash
-# Webpack production build + Forge make (ZIP for current OS)
-npm run make
+# Webpack production build + Tauri bundle for the current OS
+npm run package
 
-# Windows x64 only (from any OS that supports cross-targeting, or run on Windows)
-npm run make:win
+# macOS Intel (x86_64) cross-build from Apple Silicon (adds the Rust target first)
+npm run package:x64
 ```
 
-Artifacts appear under `out/make/zip/…`. Use **`npm run package`** if you only need an unpacked app under `out/` without zipping.
+Artifacts appear under `src-tauri/target/<triple>/bundle/` (format depends on OS: `.app`, `.dmg`, `.msi`, `.deb`, etc., per `tauri.conf.json`).
 
 ---
 
@@ -52,13 +60,13 @@ Artifacts appear under `out/make/zip/…`. Use **`npm run package`** if you only
 
 | Script | Purpose |
 |--------|---------|
-| `npm run dev` | Webpack dev server + Electron with HMR |
+| `npm run dev` | Webpack dev server + Tauri (`beforeDevCommand` → port **3000**) |
+| `npm run dev:web` | Webpack dev server only |
 | `npm run build` | Webpack production build → `build/` |
-| `npm run prod` | Run Electron against `build/` |
-| `npm run start` | Electron Forge start (alternative entry) |
-| `npm run package` | Build + Forge package (unpacked app) |
-| `npm run make` | Build + Forge **ZIP** for current platform |
-| `npm run make:win` | Build + Forge ZIP for **win32 x64** |
+| `npm run tauri` | Passthrough to `@tauri-apps/cli` |
+| `npm run tauri:build` | Tauri build (expects `build/` already present) |
+| `npm run package` | `build` + `tauri build` for current host |
+| `npm run package:x64` | `build` + `tauri build --target x86_64-apple-darwin` |
 | `npm test` | Jest |
 | `npm run lint` | ESLint |
 
@@ -71,16 +79,20 @@ excalidraw-x/
 ├── README.md
 ├── DEVELOPMENT.md
 ├── LICENSE
-├── main.js                 # Electron main: window, menu, IPC, recent files, library cache, close guard
-├── preload.js              # contextBridge → window.electron
-├── forge.config.js         # Forge packager + ZIP maker + fuses
+├── src-tauri/              # Tauri 2 Rust app (commands, menu, paths, bundler)
+│   ├── src/
+│   ├── capabilities/
+│   └── tauri.conf.json
 ├── webpack.config.js
 ├── index.html
-├── assets/                 # App / window icons (e.g. icon.ico on Windows)
+├── assets/                 # App icons: icon.png, icon.icns, icon.ico (see `bundle.icon` in tauri.conf.json)
+├── locales/              # Shared desktop UI strings (JSON) for JS + Rust menu
 ├── public/                 # Static assets for dev server / copies
 ├── src/
 │   ├── index.jsx           # React entry
-│   ├── App.jsx             # Excalidraw shell, IPC, dialogs, welcome screen
+│   ├── App.jsx             # Excalidraw shell, desktop bridge, dialogs, welcome screen
+│   ├── desktopApi.js       # Tauri invoke/listen adapter for the shell
+│   ├── desktopUiStrings.js # Loads locales for the renderer
 │   ├── sceneDirty.js       # Snapshot-based dirty detection
 │   └── components/
 │       └── ConfirmModal.jsx
@@ -93,16 +105,35 @@ excalidraw-x/
 
 - **React** & **React DOM** — UI shell
 - **@excalidraw/excalidraw** — drawing application
-- **Electron** — desktop runtime
-- **Webpack 5** — bundling; **Electron Forge** — packaging and ZIP makers
+- **Tauri 2** — desktop runtime (Rust + system webview)
+- **Webpack 5** — bundling
 - **Jest** & **Testing Library** — tests
 - **ESLint** — linting
 
-Exact versions are pinned in `package.json`.
+Exact versions are pinned in `package.json` and `src-tauri/Cargo.toml`.
+
+---
+
+## Git: what to commit
+
+**Commit:** application source (`src/`, `src-tauri/src/`, `assets/`, `locales/`, `public/`, config files, `package-lock.json`, `Cargo.toml`, etc.).
+
+**Do not commit (see root `.gitignore`):**
+
+| Path / pattern | Why |
+|----------------|-----|
+| `node_modules/` | npm install |
+| `build/`, `dist/` | Webpack production output (`npm run build`) |
+| `src-tauri/target/` | Rust compile and Tauri bundle output |
+| `out/` | Legacy Electron Forge output (removed in Tauri-only workflow) |
+| `.env*` (local) | Secrets |
+| IDE/OS junk, logs, `coverage/`, `.eslintcache` | Local only |
+
+You still **need** a `build/` folder on disk before `tauri build` or when pointing Tauri at the static app — it is just regenerated from source, not versioned.
 
 ---
 
 ## Configuration notes
 
-- **Icons (Windows):** Place **`assets/icon.ico`** (and the base name **`assets/icon`** for electron-packager) for executable and window icons. Maintain these files yourself if you change branding.
-- **Code signing (Windows):** Set `WINDOWS_CERTIFICATE_FILE` and optionally `WINDOWS_CERTIFICATE_PASSWORD` before `npm run make` / `make:win` when you sign release binaries.
+- **Icons:** The release bundle uses **`assets/icon.png`**, **`assets/icon.icns`**, and **`assets/icon.ico`** (`src-tauri/tauri.conf.json` → `bundle.icon`). To regenerate standard sizes from a master PNG, run `npm exec tauri icon ./assets/icon.png -o ./assets` (optional; adds e.g. `32x32.png` next to the source files).
+- **Code signing:** Follow Tauri’s platform docs for Windows/macOS signing when publishing releases.

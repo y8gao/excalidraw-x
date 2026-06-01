@@ -1,66 +1,120 @@
 # ExcalidrawX
 
 [![CI](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/y8gao/excalidraw-x/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**ExcalidrawX** is a desktop application that wraps [Excalidraw](https://excalidraw.com/) in [Electron](https://www.electronjs.org/). You get the same infinite canvas, shapes, collaboration-oriented workflow, and library as the web app, but with a **native menu bar**, **real file paths**, **offline-friendly bundling**, and **OS-integrated** behavior suited to daily use on Windows, macOS, or Linux.
+**Excalidraw as a native desktop app.** Same infinite canvas, hand-drawn style, and library you love — now with proper file associations, native menus, OS theme integration, and real file paths. Works offline. Feels like a first-class citizen on your operating system.
 
-Excalidraw itself is an open-source virtual whiteboard. This repository only adds the **desktop shell and integrations** described below; all drawing features come from `@excalidraw/excalidraw`.
-
----
-
-## Features on top of Excalidraw
-
-| Area | What ExcalidrawX adds |
-|------|------------------------|
-| **Files** | **Open / Save / Save As** for `.excalidraw` (and JSON) via native dialogs; **Export Image…** (PNG) to a chosen path — print from your system viewer or editor if needed. |
-| **Recent files** | **Open Recent** in the menu and on the **welcome screen**; list persisted under the app user-data folder; **clear recent** from the menu. |
-| **Unsaved changes** | **Dirty tracking** so the window close flow and **New / Open** can prompt to **Save**, **Discard**, or **Cancel** before losing work. |
-| **Window & title** | **Title bar** shows `ExcalidrawX - <filename>` or **Untitled**; integrates with the OS close guard when there are unsaved changes. |
-| **Native menu** | Full **File**, **Edit**, **View**, **Library**, **Window**, and **Help** menus with standard accelerators (e.g. Ctrl+O/S, zoom, find on canvas). Menu **checkboxes** stay in sync with Excalidraw (zen, grid, snap, view mode). |
-| **Appearance** | **Auto / Light / Dark** under **Window → Appearance**, tied to **Excalidraw’s theme** and the OS when Auto is selected. |
-| **Language** | **Window → Language** submenu built from Excalidraw’s built-in locale list. |
-| **Canvas** | **View → Reset canvas** with a confirmation dialog; **Canvas Settings** side panel tab (custom tab + Excalidraw’s change-canvas-background control). **View → Toggle Sidebar** (Ctrl/Cmd+B) opens the sidebar on the **Canvas Settings** tab. |
-| **Library** | Dedicated **Library** menu: browse the official libraries site in the **system browser**, **import** / **save** `.excalidrawlib` files, **reset** personal library items (with confirmation), and **toggle** the library sidebar (docked). See [Library menu & cache](#library-menu--cache) below. |
-| **Library cache** | The full library (built-in rows, imports, and unsaved changes) is **persisted automatically** under the app **user data** directory as `library-cache.excalidrawlib` and **restored on the next launch**. Invalid cache files are discarded. This is **per device** (not cloud-synced). |
-| **UX polish** | In-app **hamburger menu** is hidden so actions live in the **native menubar**; **modal dialogs** (reset canvas / reset library / unsaved) support **Escape**, **backdrop click**, and **focus trap**. Opening **libraries.excalidraw.com** from the app uses the **default browser**, not an in-app window. |
-| **Distribution** | From source you can produce **ZIP** packages per platform with **Electron Forge**; optional **Windows code signing**. Details are in the [Development guide](DEVELOPMENT.md). |
-| **Quality** | **Jest** and **ESLint** in the repository; the UI bundle includes fonts and assets **without relying on a public CDN** for the app shell. See [Development guide](DEVELOPMENT.md) to run tests and lint. |
+![ExcalidrawX screenshots](./assets/excalidrawx-screenshot.png)
 
 ---
 
-## Library menu & cache
+## Why a desktop app?
 
-### Menu actions
-
-| Item | Shortcut (Windows / Linux) | Shortcut (macOS) | What it does |
-|------|---------------------------|------------------|--------------|
-| **Browse libraries (web)…** | Ctrl+Alt+B | ⌥⌘B | Opens [libraries.excalidraw.com](https://libraries.excalidraw.com/) in the **system browser**. |
-| **Import Library…** | Ctrl+Shift+O | ⇧⌘O | Native file picker for `.excalidrawlib` (or JSON); merges into the current library. |
-| **Save to…** | Ctrl+Alt+E | ⌥⌘E | Saves the **entire** current library to a file you choose (same format as import). |
-| **Reset Library** | Ctrl+Shift+Backspace | ⇧⌘⌫ | After confirmation, removes **personal** library rows; built-in Excalidraw library items stay. |
-| **Toggle Library** | Ctrl+Alt+L | ⌥⌘L | Opens the sidebar, switches to the **Library** tab, and **pins** (docks) it. |
-
-Use **Cmd** instead of **Ctrl** on macOS where the table says Ctrl (Electron uses `CmdOrCtrl` in the menu).
-
-**Why not Ctrl+Shift+L for import?** In upstream Excalidraw, **Ctrl/Cmd+Shift+L** is reserved for **locking selected elements**. Import uses **Ctrl/Cmd+Shift+O** instead (open file, analogous to **Open** for drawings).
-
-### Automatic library cache
-
-- **Location:** `{userData}/library-cache.excalidrawlib`, where `{userData}` is Electron’s [app userData path](https://www.electronjs.org/docs/latest/api/app#appgetpathname) for your OS (e.g. `%APPDATA%` on Windows, `~/Library/Application Support/…` on macOS, `~/.config/…` or XDG on Linux).
-- **When it updates:** After library changes, writes are **debounced**; the cache is also **flushed when the document becomes hidden** (e.g. switching away or closing) so recent edits are less likely to be lost.
-- **Scope:** One cache file **per install / user profile** on that machine. To copy a library to another computer, use **Save to…** and **Import Library…**, or copy the cache file manually.
+| Web version | ExcalidrawX |
+|---|---|
+| Runs in a browser tab | Runs as a native window |
+| No file associations — can't double-click `.excalidraw` | **Double-click any `.excalidraw` file** — it just opens |
+| Ctrl+S triggers browser's "Save Page" | Ctrl+S opens a **native Save dialog** at a real path |
+| No recent files across sessions | **Recent files** in the menu and welcome screen |
+| Theme tied to browser/system | **Auto / Light / Dark** via Window → Appearance |
+| No dirty-state protection | Prompts to **Save / Discard** before losing unsaved work |
+| Language follows browser | Choose any **Excalidraw locale** from the Window menu |
+| Browser manages window title | Title bar shows `ExcalidrawX — filename` |
 
 ---
 
-## Usage
+## Quick start
 
-1. **From source:** clone the repository, run `npm install`, then either run **`npm run dev`** (live-reload development) or **`npm run build`** followed by **`npm run prod`** to run a production build locally.
-2. **Packaging:** to create **ZIP** installers or configure signing, see the **[Development guide](DEVELOPMENT.md)**.
+### Download (recommended)
+
+Get the latest build for your platform from the [Releases page](https://github.com/y8gao/excalidraw-x/releases).
+
+- **macOS:** Download the `.dmg`, drag to Applications
+- **Windows:** Download the `.msi` installer
+- **Linux:** Download the `.deb` or `.AppImage`
+
+### Build from source
+
+```bash
+git clone https://github.com/y8gao/excalidraw-x.git
+cd excalidraw-x
+npm install
+npm run dev        # launch with hot-reload
+npm run package    # produce an installer for your OS
+```
+
+Requires Node 22+ and Rust. See the [Development guide](DEVELOPMENT.md) for platform-specific setup.
 
 ---
 
-## License & links
+## What you get
 
-- This project is licensed under the **[MIT License](LICENSE)**.
-- **Contributors:** setup, scripts, tests, and packaging — **[Development guide](DEVELOPMENT.md)**.
-- Excalidraw is a separate project with its own license; see the [Excalidraw repository](https://github.com/excalidraw/excalidraw) for details.
+### Real files, finally
+
+`.excalidraw` becomes a real file type. Double-click one in Finder / Explorer / your file manager, and it opens in ExcalidrawX. Save, Save As, and Export to PNG all use **native OS file dialogs**. No more downloading your own drawings from a browser tab.
+
+| Action | Shortcut |
+|---|---|
+| Open | Ctrl+O |
+| Save | Ctrl+S |
+| Save As | Ctrl+Shift+S |
+| Export PNG | Ctrl+Shift+E |
+
+### Never lose work
+
+Close the window mid-sketch and ExcalidrawX asks whether to **Save**, **Discard**, or **Cancel**. Same guard when opening another file or starting a new drawing. The title bar always shows the current filename — or "Untitled" when nothing is saved yet.
+
+### Library that persists
+
+Import `.excalidrawlib` files, browse the public library site, and build your collection. ExcalidrawX **automatically caches** your library to disk and restores it on next launch. Save your library to share with teammates, or keep it per-machine.
+
+| Action | Shortcut |
+|---|---|
+| Browse libraries | Ctrl+Alt+B |
+| Import library | Ctrl+Shift+O |
+| Save library | Ctrl+Alt+E |
+| Toggle library panel | Ctrl+Alt+L |
+
+### Native menu bar
+
+Every action lives in a standard OS menu — **File**, **Edit**, **View**, **Library**, **Window**, **Help** — with platform-appropriate keyboard shortcuts. Menu checkboxes stay synced with the canvas state:
+
+- **View mode** (Alt+R)
+- **Zen mode** (Alt+Z)
+- **Grid** (Ctrl+')
+- **Snap to objects** (Alt+S)
+- **Appearance:** Auto / Light / Dark
+- **Language:** all Excalidraw built-in locales
+- **Find on canvas** (Ctrl+F)
+- **Command palette** (Ctrl+/)
+- **Toggle sidebar** (Ctrl+B)
+
+### Familiar canvas, better defaults
+
+All the Excalidraw tools you know — hand-drawn shapes, arrows, text, layers, collaboration export — sized for a desktop window (1400×900). The in-app hamburger menu is hidden so actions don't appear in two places.
+
+---
+
+## How it works
+
+ExcalidrawX wraps [`@excalidraw/excalidraw`](https://npmjs.com/package/@excalidraw/excalidraw) in [Tauri 2](https://v2.tauri.app/). The React frontend communicates with a Rust backend via Tauri's IPC bridge for all native operations: file dialogs, filesystem access, menu events, window management, and OS theme detection.
+
+```
+┌──────────────────────────────────────────┐
+│                ExcalidrawX                │
+│  ┌────────────┐    ┌───────────────────┐  │
+│  │   React    │◄──►│    Rust (Tauri)   │  │
+│  │  (canvas)  │IPC │  (files, menus,   │  │
+│  │            │    │   window, state)  │  │
+│  └────────────┘    └───────────────────┘  │
+└──────────────────────────────────────────┘
+```
+
+All drawing features come from upstream Excalidraw. This repository only adds the desktop shell and integrations.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). Excalidraw itself is a separate project with its own license; see the [Excalidraw repository](https://github.com/excalidraw/excalidraw).

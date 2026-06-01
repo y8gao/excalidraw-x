@@ -10,20 +10,11 @@ const reactSourceFiles = ['src/**/*.{js,jsx}']
 
 module.exports = [
   {
-    ignores: ['build/**', 'out/**', 'node_modules/**'],
+    ignores: ['build/**', 'src-tauri/target/**', 'node_modules/**'],
   },
   js.configs.recommended,
   {
-    files: [
-      'main.js',
-      'electronUiStrings.js',
-      'preload.js',
-      'forge.config.js',
-      'webpack.config.js',
-      'jest.config.cjs',
-      'babel.config.cjs',
-      '.github/scripts/**/*.js',
-    ],
+    files: ['webpack.config.js', 'jest.config.cjs', 'babel.config.cjs'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',
