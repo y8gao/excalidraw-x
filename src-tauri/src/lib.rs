@@ -104,6 +104,7 @@ pub fn run() {
       commands::get_recent_files,
       commands::set_dirty,
       commands::set_window_title,
+      commands::toggle_fullscreen,
       commands::set_theme,
       commands::close_window_confirmed,
       commands::relaunch_app,

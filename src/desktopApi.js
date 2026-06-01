@@ -149,6 +149,8 @@ function createDesktopApi() {
 
     setWindowTitle: (title) => invoke('set_window_title', { title }),
 
+    toggleFullscreen: () => invoke('toggle_fullscreen'),
+
     closeWindow: () => invoke('close_window_confirmed'),
 
     relaunchApp: () => invoke('relaunch_app'),

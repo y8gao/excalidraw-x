@@ -278,6 +278,15 @@ pub fn set_window_title(app: tauri::AppHandle, title: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+pub fn toggle_fullscreen(app: tauri::AppHandle) -> Result<(), String> {
+  if let Some(w) = app.get_webview_window("main") {
+    let next = !w.is_fullscreen().map_err(|e| e.to_string())?;
+    w.set_fullscreen(next).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
+
+#[tauri::command]
 pub fn set_theme(app: tauri::AppHandle, theme: String, state: State<'_, Mutex<ShellState>>) -> Result<(), String> {
   let appearance = {
     let s = state.lock().map_err(|e| e.to_string())?;

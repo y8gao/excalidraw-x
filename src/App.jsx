@@ -1,28 +1,28 @@
 import {
-  DefaultSidebar,
-  Excalidraw,
-  MainMenu,
-  Sidebar,
-  WelcomeScreen,
-  exportToBlob,
-  languages,
-  loadFromBlob,
-  loadSceneOrLibraryFromBlob,
-  MIME_TYPES,
-  serializeAsJSON,
-  serializeLibraryAsJSON,
+    DefaultSidebar,
+    Excalidraw,
+    exportToBlob,
+    languages,
+    loadFromBlob,
+    loadSceneOrLibraryFromBlob,
+    MainMenu,
+    MIME_TYPES,
+    serializeAsJSON,
+    serializeLibraryAsJSON,
+    Sidebar,
+    WelcomeScreen,
 } from '@excalidraw/excalidraw'
 import React from 'react'
 import { flushSync } from 'react-dom'
 import {
-  ConfirmModal,
-  DIALOG_BTN_DANGER,
-  DIALOG_BTN_PRIMARY,
-  DIALOG_BTN_SECONDARY,
+    ConfirmModal,
+    DIALOG_BTN_DANGER,
+    DIALOG_BTN_PRIMARY,
+    DIALOG_BTN_SECONDARY,
 } from './components/ConfirmModal.jsx'
-import { createSceneSnapshot, isSceneDirty } from './sceneDirty'
 import { getDesktopApi, terminalLog } from './desktopApi.js'
 import { getUiStrings } from './desktopUiStrings.js'
+import { createSceneSnapshot, isSceneDirty } from './sceneDirty'
 
 // Hide the Excalidraw hamburger trigger — native menubar owns file actions. Do not hide library
 // sidebar controls (tab, search, overflow menu): a broad [aria-label*="library"] rule breaks that UI.
@@ -890,6 +890,11 @@ const App = () => {
               tab: SIDEBAR_TAB_CANVAS_SETTINGS,
             })
           }
+          break
+        }
+
+        case 'toggle-fullscreen': {
+          await desktopApi?.toggleFullscreen?.()
           break
         }
 

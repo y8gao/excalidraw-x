@@ -300,7 +300,15 @@ pub fn rebuild_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
       b = b.item(&lang_sub.build()?);
     }
     b = b.separator();
-    b = b.fullscreen();
+    if cfg!(target_os = "macos") {
+      b = b.fullscreen();
+    } else {
+      b = b.item(
+        &MenuItemBuilder::with_id("window_toggle_fullscreen", t(&labels, "menuFullscreen"))
+          .accelerator("F11")
+          .build(app)?,
+      );
+    }
     b.build()?
   };
 
@@ -372,6 +380,7 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: &tauri::menu::Me
     "view_zoom_reset" => emit_canvas_key(&win, "0", false),
     "view_reset_canvas" => emit!("reset-canvas"),
     "view_toggle_sidebar" => emit!("toggle-sidebar"),
+    "window_toggle_fullscreen" => emit!("toggle-fullscreen"),
     "lib_browse_web" => {
       let _ = app
         .opener()
