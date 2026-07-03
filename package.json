@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-x",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "homepage": "./",
   "scripts": {
     "dev": "node scripts/run-tauri.cjs dev",

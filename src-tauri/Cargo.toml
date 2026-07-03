@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.2"
+version = "0.2.3"
 description = "Excalidraw desktop client"
 authors = ["Yang Gao <yang.xz.gao@outlook.com>"]
 license = "MIT"
