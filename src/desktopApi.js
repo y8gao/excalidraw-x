@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 let openPatched = false
+let libraryAnchorClickPatched = false
 let desktopApiSingleton = null
 
 /**
@@ -31,7 +32,7 @@ function patchWindowOpenForLibraries() {
     try {
       const s = url != null ? String(url) : ''
       if (s.includes('libraries.excalidraw.com')) {
-        invoke('open_allowed_url', { url: s }).catch(() => {})
+        openAllowedLibraryUrl(s)
         return null
       }
     } catch {
@@ -39,6 +40,21 @@ function patchWindowOpenForLibraries() {
     }
     return orig.call(window, url, target, features)
   }
+}
+
+function openAllowedLibraryUrl(url) {
+  invoke('open_allowed_url', { url }).catch(() => {})
+}
+
+function patchLibraryAnchorClicks() {
+  if (libraryAnchorClickPatched || typeof document === 'undefined') return
+  libraryAnchorClickPatched = true
+  document.addEventListener('click', (event) => {
+    const anchor = event.target?.closest?.('a[href*="libraries.excalidraw.com"]')
+    if (!anchor) return
+    event.preventDefault()
+    openAllowedLibraryUrl(anchor.href)
+  }, true)
 }
 
 function onOpenFilePathEvent(e) {
@@ -88,12 +104,14 @@ export async function prepareDesktopApi() {
   }
   console.log('[excalidraw-x] prepareDesktopApi: Tauri detected, patching window.open and registering listener')
   patchWindowOpenForLibraries()
+  patchLibraryAnchorClicks()
   await ensureOpenFilePathListener()
 }
 
 function createDesktopApi() {
   console.log('[excalidraw-x] createDesktopApi: initializing desktop API bridge')
   patchWindowOpenForLibraries()
+  patchLibraryAnchorClicks()
   void ensureOpenFilePathListener()
 
   const api = {

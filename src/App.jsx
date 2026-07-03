@@ -45,9 +45,11 @@ const LIBRARY_SAVE_FILTERS = [{ name: 'Excalidraw Library', extensions: ['excali
 
 /** Matches Excalidraw `DEFAULT_SIDEBAR` / `LIBRARY_SIDEBAR_TAB` (@excalidraw/common). */
 const SIDEBAR_NAME_DEFAULT = 'default'
+const SIDEBAR_TAB_SEARCH = 'search'
 const SIDEBAR_TAB_LIBRARY = 'library'
 /** Custom `DefaultSidebar` tab in this app (Canvas Settings / preferences). */
 const SIDEBAR_TAB_CANVAS_SETTINGS = 'canvas-settings'
+const DESKTOP_LANGUAGE_CODES = new Set(['en', 'zh-CN', 'zh-TW'])
 
 const LIBRARY_CACHE_SAVE_DEBOUNCE_MS = 450
 
@@ -118,6 +120,44 @@ const SidebarTriggerIcon = (
     <path d="M15 4l0 16" />
   </svg>
 )
+
+function getSidebarTooltip() {
+  let tooltip = document.querySelector('.excalidraw-tooltip')
+  if (!tooltip) {
+    tooltip = document.createElement('div')
+    tooltip.classList.add('excalidraw-tooltip')
+    document.body.appendChild(tooltip)
+  }
+  return tooltip
+}
+
+function positionSidebarTooltip(tooltip, target) {
+  const targetRect = target.getBoundingClientRect()
+  const tooltipRect = tooltip.getBoundingClientRect()
+  const margin = 5
+  let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2
+  left = Math.max(margin, Math.min(left, window.innerWidth - tooltipRect.width - margin))
+  let top = targetRect.bottom + margin
+  if (top + tooltipRect.height >= window.innerHeight) {
+    top = targetRect.top - tooltipRect.height - margin
+  }
+  Object.assign(tooltip.style, { left: `${left}px`, top: `${top}px` })
+}
+
+function showSidebarTooltip(target) {
+  const label = target.dataset.sidebarTooltip
+  if (!label) return
+  const tooltip = getSidebarTooltip()
+  tooltip.textContent = label
+  tooltip.style.minWidth = '10ch'
+  tooltip.style.maxWidth = '15ch'
+  tooltip.classList.add('excalidraw-tooltip--visible')
+  positionSidebarTooltip(tooltip, target)
+}
+
+function hideSidebarTooltip() {
+  document.querySelector('.excalidraw-tooltip')?.classList.remove('excalidraw-tooltip--visible')
+}
 
 /** Matches Excalidraw's internal isUniqueItem comparison (order-sensitive). */
 function libraryItemElementSignature(item, indexForEmpty = 0) {
@@ -200,6 +240,7 @@ const App = () => {
   const [sidebarDocked, setSidebarDocked] = React.useState(false)
   const [recentFiles, setRecentFiles] = React.useState([])
   const excalidrawApiRef = React.useRef(null)
+  const suppressedMenuActionRef = React.useRef({ actionName: '', expiresAt: 0 })
   const libraryDedupeBusyRef = React.useRef(false)
   const libraryItemsRef = React.useRef([])
   const libraryCacheReadyRef = React.useRef(false)
@@ -245,6 +286,48 @@ const App = () => {
         })
     })
   }, [scheduleLibraryCacheSave])
+
+  const supportedDesktopLanguages = React.useMemo(() => {
+    if (!Array.isArray(languages)) return []
+    return languages
+      .filter(({ code }) => DESKTOP_LANGUAGE_CODES.has(code))
+      .map(({ code, label }) => ({ code, label }))
+  }, [])
+
+  const suppressMenuAction = React.useCallback((actionName) => {
+    suppressedMenuActionRef.current = {
+      actionName,
+      expiresAt: Date.now() + 250,
+    }
+  }, [])
+
+  const shouldIgnoreSuppressedMenuAction = React.useCallback((actionName) => {
+    const current = suppressedMenuActionRef.current
+    if (current.actionName !== actionName) return false
+    suppressedMenuActionRef.current = { actionName: '', expiresAt: 0 }
+    return current.expiresAt >= Date.now()
+  }, [])
+
+  const openSidebarTab = React.useCallback((tab, options = {}) => {
+    if (!excalidrawAPI) return false
+    if (options.dock) {
+      flushSync(() => setSidebarDocked(true))
+    }
+    excalidrawAPI.toggleSidebar({ name: SIDEBAR_NAME_DEFAULT, tab })
+    return true
+  }, [excalidrawAPI])
+
+  const openLibrarySidebar = React.useCallback((options) => {
+    return openSidebarTab(SIDEBAR_TAB_LIBRARY, options)
+  }, [openSidebarTab])
+
+  const openSearchSidebar = React.useCallback((options) => {
+    return openSidebarTab(SIDEBAR_TAB_SEARCH, options)
+  }, [openSidebarTab])
+
+  const openCanvasSettingsSidebar = React.useCallback((options) => {
+    return openSidebarTab(SIDEBAR_TAB_CANVAS_SETTINGS, options)
+  }, [openSidebarTab])
 
   // Run fn() without marking canvas dirty (clears the flag after all sync onChange calls settle)
   const withoutDirty = React.useCallback((fn) => {
@@ -705,8 +788,8 @@ const App = () => {
     if (!excalidrawAPI) return
 
     // Send language list to main process so it can build the Language submenu
-    if (languages && languages.length > 0) {
-      desktopApi?.setLanguages(languages.map(({ code, label }) => ({ code, label })))
+    if (supportedDesktopLanguages.length > 0) {
+      desktopApi?.setLanguages(supportedDesktopLanguages)
     }
 
     const cleanup = desktopApi?.onMenuAction(async (action) => {
@@ -718,6 +801,7 @@ const App = () => {
       const colonIdx = action.indexOf(':')
       const actionName = colonIdx >= 0 ? action.substring(0, colonIdx) : action
       const actionValue = colonIdx >= 0 ? action.substring(colonIdx + 1) : null
+      if (shouldIgnoreSuppressedMenuAction(actionName)) return
 
       switch (actionName) {
         case 'confirm-close': {
@@ -884,12 +968,7 @@ const App = () => {
         }
 
         case 'toggle-sidebar': {
-          if (excalidrawAPI) {
-            excalidrawAPI.toggleSidebar({
-              name: SIDEBAR_NAME_DEFAULT,
-              tab: SIDEBAR_TAB_CANVAS_SETTINGS,
-            })
-          }
+          openCanvasSettingsSidebar()
           break
         }
 
@@ -899,9 +978,7 @@ const App = () => {
         }
 
         case 'toggle-library': {
-          if (!excalidrawAPI) break
-          flushSync(() => setSidebarDocked(true))
-          excalidrawAPI.toggleSidebar({ name: SIDEBAR_NAME_DEFAULT, tab: SIDEBAR_TAB_LIBRARY })
+          openLibrarySidebar({ dock: true })
           break
         }
 
@@ -964,7 +1041,93 @@ const App = () => {
     })
 
     return cleanup
-  }, [desktopApi, doOpenFile, doOpenFilePath, excalidrawAPI, rememberCurrentSceneCleanSoon, saveDrawing, updateTitle, withoutDirty])
+  }, [
+    desktopApi,
+    doOpenFile,
+    doOpenFilePath,
+    excalidrawAPI,
+    openCanvasSettingsSidebar,
+    openLibrarySidebar,
+    rememberCurrentSceneCleanSoon,
+    saveDrawing,
+    shouldIgnoreSuppressedMenuAction,
+    supportedDesktopLanguages,
+    updateTitle,
+    withoutDirty,
+  ])
+
+  React.useEffect(() => {
+    if (!excalidrawAPI) return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.defaultPrevented || event.repeat) return
+
+      const key = typeof event.key === 'string' ? event.key.toLowerCase() : ''
+      const hasPrimaryModifier = event.ctrlKey || event.metaKey
+      if (!hasPrimaryModifier || event.shiftKey) return
+
+      if (!event.altKey && key === 'b') {
+        event.preventDefault()
+        suppressMenuAction('toggle-sidebar')
+        openCanvasSettingsSidebar()
+        return
+      }
+
+      if (event.altKey && key === 'l') {
+        event.preventDefault()
+        suppressMenuAction('toggle-library')
+        openLibrarySidebar({ dock: true })
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [excalidrawAPI, openCanvasSettingsSidebar, openLibrarySidebar, suppressMenuAction])
+
+  React.useEffect(() => {
+    const labels = [ui.menuFindOnCanvas, ui.menuLibrary, ui.sidebarCanvasSettings]
+    const applyTooltipLabels = () => {
+      const triggerRoot = document.querySelector('.default-sidebar .sidebar-triggers')
+      if (!triggerRoot) return
+      triggerRoot.querySelectorAll('.sidebar-tab-trigger').forEach((button, index) => {
+        const label = labels[index]
+        if (!label) return
+        button.dataset.sidebarTooltip = label
+        if (!button.getAttribute('aria-label')) {
+          button.setAttribute('aria-label', label)
+        }
+      })
+    }
+
+    applyTooltipLabels()
+
+    const observer = new MutationObserver(applyTooltipLabels)
+    observer.observe(document.body, { childList: true, subtree: true })
+
+    const getTooltipTarget = (event) => {
+      const target = event.target?.closest?.('.sidebar-tab-trigger')
+      if (!target?.closest?.('.default-sidebar .sidebar-triggers')) return null
+      return target
+    }
+    const show = (event) => {
+      const target = getTooltipTarget(event)
+      if (target) showSidebarTooltip(target)
+    }
+    const hide = () => hideSidebarTooltip()
+
+    document.addEventListener('pointerover', show)
+    document.addEventListener('focusin', show)
+    document.addEventListener('pointerout', hide)
+    document.addEventListener('focusout', hide)
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('pointerover', show)
+      document.removeEventListener('focusin', show)
+      document.removeEventListener('pointerout', hide)
+      document.removeEventListener('focusout', hide)
+      hideSidebarTooltip()
+    }
+  }, [ui.menuFindOnCanvas, ui.menuLibrary, ui.sidebarCanvasSettings])
 
   const handleBgColorChange = React.useCallback((e) => {
     if (!excalidrawAPI) return
@@ -1170,17 +1333,21 @@ const App = () => {
           {/* Custom sidebar: Canvas Settings tab + built-in Library (📚) + Find on Canvas (🔍) tabs */}
           <DefaultSidebar docked={sidebarDocked} onDock={setSidebarDocked}>
             <DefaultSidebar.TabTriggers>
-              <Sidebar.TabTrigger tab="canvas-settings" title={ui.sidebarCanvasSettings}>
+              <Sidebar.TabTrigger tab={SIDEBAR_TAB_CANVAS_SETTINGS} aria-label={ui.sidebarCanvasSettings}>
                 <SidebarSettingsIcon />
               </Sidebar.TabTrigger>
             </DefaultSidebar.TabTriggers>
-            <Sidebar.Tab tab="canvas-settings" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Sidebar.Tab tab={SIDEBAR_TAB_CANVAS_SETTINGS} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ fontWeight: 600, fontSize: 13, marginTop: 4 }}>{ui.sidebarCanvasSettings}</div>
               <MainMenu.DefaultItems.ChangeCanvasBackground />
             </Sidebar.Tab>
           </DefaultSidebar>
           {/* Trigger button — renders into the top-right corner via Excalidraw's tunnel */}
-          <DefaultSidebar.Trigger title={ui.sidebarCanvasSettings} icon={SidebarTriggerIcon} />
+          <DefaultSidebar.Trigger
+            title={ui.menuToggleSidebar}
+            icon={SidebarTriggerIcon}
+            onSelect={() => openSearchSidebar()}
+          />
           <WelcomeScreen>
             <WelcomeScreen.Center>
               <WelcomeScreen.Center.Logo />

@@ -6,7 +6,7 @@ use std::path::Path;
 
 const MAX_RECENT: usize = 10;
 
-/// `.excalidraw` association / argv / single-instance (shared with `lib.rs`).
+/// `.excalidraw` association / argv handling (shared with `lib.rs`).
 pub(crate) fn is_excalidraw_document_path(path: &Path) -> bool {
   path
     .extension()

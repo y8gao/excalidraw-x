@@ -61,7 +61,7 @@ jest.mock('@excalidraw/excalidraw', () => {
         { id: 'lib-row-1', status: 'unpublished', elements: [{ id: 'e1', type: 'rectangle', versionNonce: 1 }] },
       ])
     }, [onChange, excalidrawAPI, onLibraryChange])
-    return ReactLib.createElement('div', { 'data-testid': 'excalidraw-root' }, children)
+    return ReactLib.createElement('div', { 'data-testid': 'excalidraw-root', className: 'excalidraw' }, children)
   }
 
   const wrap = (tag = 'div', omitProps = []) => ({ children, ...props }) => {
@@ -71,7 +71,11 @@ jest.mock('@excalidraw/excalidraw', () => {
     })
     return ReactLib.createElement(tag, domProps, children)
   }
-  const buttonWrap = () => ({ children, onSelect, onClick, ...props }) => ReactLib.createElement('button', { onClick: onClick || onSelect, ...props }, children)
+  const buttonWrap = (extraClassName = '') => ({ children, onSelect, onClick, className = '', ...props }) => ReactLib.createElement(
+    'button',
+    { onClick: onClick || onSelect, className: [extraClassName, className].filter(Boolean).join(' '), ...props },
+    children,
+  )
 
   const MainMenu = wrap()
   MainMenu.ItemCustom = wrap()
@@ -79,13 +83,24 @@ jest.mock('@excalidraw/excalidraw', () => {
     ChangeCanvasBackground: wrap(),
   }
 
-  const DefaultSidebar = wrap('div', ['docked', 'onDock'])
-  DefaultSidebar.TabTriggers = wrap()
+  const DefaultSidebar = ({ children, ...props }) => {
+    const domProps = { ...props }
+    delete domProps.docked
+    delete domProps.onDock
+    return ReactLib.createElement('div', { className: 'default-sidebar', ...domProps }, children)
+  }
+  DefaultSidebar.TabTriggers = ({ children }) => ReactLib.createElement(
+    'div',
+    { className: 'sidebar-triggers' },
+    ReactLib.createElement('button', { className: 'sidebar-tab-trigger', type: 'button' }, 'Search'),
+    ReactLib.createElement('button', { className: 'sidebar-tab-trigger', type: 'button' }, 'Library'),
+    children,
+  )
   DefaultSidebar.Trigger = buttonWrap()
 
   const Sidebar = wrap()
   Sidebar.Tab = wrap()
-  Sidebar.TabTrigger = buttonWrap()
+  Sidebar.TabTrigger = buttonWrap('sidebar-tab-trigger')
   Sidebar.Header = wrap()
 
   const WelcomeScreen = wrap()
@@ -118,7 +133,12 @@ jest.mock('@excalidraw/excalidraw', () => {
     WelcomeScreen,
     DefaultSidebar,
     Sidebar,
-    languages: [{ code: 'en', label: 'English' }],
+    languages: [
+      { code: 'en', label: 'English' },
+      { code: 'zh-CN', label: '简体中文' },
+      { code: 'zh-TW', label: '繁體中文' },
+      { code: 'fr-FR', label: 'Français' },
+    ],
     MIME_TYPES,
     loadSceneOrLibraryFromBlob,
     loadFromBlob: jest.fn(async () => ({
@@ -323,7 +343,31 @@ describe('App integration: menu + dirty IPC', () => {
     )
   })
 
-  it('toggle-sidebar opens canvas-settings tab', async () => {
+  it('sends only supported desktop languages to the native menu', async () => {
+    render(React.createElement(App))
+    await flush()
+
+    expect(desktop.setLanguages).toHaveBeenCalledWith([
+      { code: 'en', label: 'English' },
+      { code: 'zh-CN', label: '简体中文' },
+      { code: 'zh-TW', label: '繁體中文' },
+    ])
+  })
+
+  it('top-right sidebar trigger opens the search tab', async () => {
+    render(React.createElement(App))
+    await flush()
+
+    const api = __mock.getExcalidrawApi()
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Toggle Sidebar'))
+    })
+
+    expect(api.toggleSidebar).toHaveBeenCalledWith({ name: 'default', tab: 'search' })
+  })
+
+  it('toggle-sidebar opens canvas settings tab', async () => {
     render(React.createElement(App))
     await flush()
 
@@ -344,6 +388,47 @@ describe('App integration: menu + dirty IPC', () => {
 
     await act(async () => {
       await menuHandler('toggle-library')
+    })
+
+    expect(api.toggleSidebar).toHaveBeenCalledWith({ name: 'default', tab: 'library' })
+  })
+
+  it('Ctrl+B opens canvas settings tab', async () => {
+    render(React.createElement(App))
+    await flush()
+
+    const api = __mock.getExcalidrawApi()
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
+    })
+
+    expect(api.toggleSidebar).toHaveBeenCalledWith({ name: 'default', tab: 'canvas-settings' })
+  })
+
+  it('adds themed tooltip labels to sidebar tabs', async () => {
+    render(React.createElement(App))
+    await flush()
+
+    const tabButtons = document.querySelectorAll('.sidebar-tab-trigger')
+
+    await waitFor(() => {
+      expect([...tabButtons].map((button) => button.dataset.sidebarTooltip)).toEqual([
+        'Find on Canvas',
+        'Library',
+        'Canvas Settings',
+      ])
+    })
+  })
+
+  it('Ctrl+Alt+L triggers the library shortcut', async () => {
+    render(React.createElement(App))
+    await flush()
+
+    const api = __mock.getExcalidrawApi()
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'l', ctrlKey: true, altKey: true })
     })
 
     expect(api.toggleSidebar).toHaveBeenCalledWith({ name: 'default', tab: 'library' })

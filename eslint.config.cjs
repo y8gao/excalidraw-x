@@ -14,7 +14,7 @@ module.exports = [
   },
   js.configs.recommended,
   {
-    files: ['webpack.config.js', 'jest.config.cjs', 'babel.config.cjs'],
+    files: ['webpack.config.js', 'jest.config.cjs', 'babel.config.cjs', 'scripts/**/*.cjs'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',
@@ -44,7 +44,7 @@ module.exports = [
     settings: { react: { version: 'detect' } },
   },
   {
-    files: ['src/**/*.test.js'],
+    files: ['src/**/*.test.js', 'scripts/**/*.test.cjs'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

@@ -3,17 +3,17 @@
   "version": "0.2.2",
   "homepage": "./",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/run-tauri.cjs dev",
     "dev:web": "webpack serve --mode development",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "build": "webpack --mode production",
-    "tauri": "tauri",
-    "tauri:build": "tauri build",
-    "package": "npm run build && tauri build",
-    "package:x64": "npm run build && tauri build --target x86_64-apple-darwin"
+    "tauri": "node scripts/run-tauri.cjs",
+    "tauri:build": "node scripts/run-tauri.cjs build",
+    "package": "npm run build && npm run tauri:build",
+    "package:x64": "npm run build && npm run tauri -- build --target x86_64-apple-darwin"
   },
   "keywords": [],
   "author": "Yang Gao <yang.xz.gao@outlook.com>",
@@ -54,5 +54,6 @@
     "webpack": "^5.88.0",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^5.2.3"
-  }
+  },
+  "packageManager": "pnpm@11.1.1+sha512.d1fdf5f73c617b64fa1a56a81c3c8dfe0e966e33a6010aa256b517ae77be21d93e05affc0de1a83b0e4f29d569f68b446ae8f068cd7247c0bb3df0fb4d7bdf9a"
 }

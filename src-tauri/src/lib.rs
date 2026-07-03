@@ -6,10 +6,14 @@ mod paths;
 mod state;
 
 use state::ShellState;
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::AppHandle;
+use tauri::{Emitter, Manager};
 
 macro_rules! debug_eprintln {
   ($($arg:tt)*) => {
@@ -34,12 +38,12 @@ fn apply_theme_for_appearance(win: &tauri::WebviewWindow, appearance: &str) {
   }
 }
 
-/// Windows/Linux: file path is usually in `argv` → `ShellState.pending_open_file` → `take_pending_os_file`.
 /// macOS: Launch Services delivers **no reliable argv** for "Open With"; use [`RunEvent::Opened`] instead.
 ///
 /// Always queue `pending_open_file` when the path is valid: `WebviewWindow::emit` can succeed while the
 /// frontend has not yet subscribed to `open-file-path`, which would drop the event. The shell still
 /// emits for the hot path (app already running, listener registered).
+#[cfg(target_os = "macos")]
 fn deliver_open_file_path(app: &AppHandle, path: String) {
   let p = Path::new(&path);
   if !state::is_excalidraw_document_path(p) || p.is_dir() {
@@ -69,22 +73,6 @@ fn deliver_open_file_path(app: &AppHandle, path: String) {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
-    .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-      debug_eprintln!("[excalidraw-x] single_instance callback: argv={argv:?}");
-      if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_focus();
-      }
-      for arg in argv {
-        if arg.starts_with('-') {
-          continue;
-        }
-        let p = PathBuf::from(&arg);
-        if state::is_excalidraw_document_path(&p) && !p.is_dir() {
-          debug_eprintln!("[excalidraw-x] single_instance: delivering path={arg}");
-          deliver_open_file_path(app, arg);
-        }
-      }
-    }))
     .manage(Mutex::new(ShellState::new()))
     .invoke_handler(tauri::generate_handler![
       commands::open_allowed_url,
@@ -268,6 +256,11 @@ pub fn run() {
           }
         }
         _ => {}
+      }
+      #[cfg(not(target_os = "macos"))]
+      {
+        let _ = app;
+        let _ = event;
       }
     });
 }
