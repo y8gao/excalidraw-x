@@ -11,9 +11,9 @@ function sortDescending(values) {
   return [...values].sort((left, right) => right.localeCompare(left, undefined, { numeric: true, sensitivity: 'base' }))
 }
 
-function prependEnvPath(currentValue, values) {
-  const current = (currentValue || '').split(path.delimiter).filter(Boolean)
-  return [...new Set([...values.filter(Boolean), ...current])].join(path.delimiter)
+function prependEnvPath(currentValue, values, delimiter = path.delimiter) {
+  const current = (currentValue || '').split(delimiter).filter(Boolean)
+  return [...new Set([...values.filter(Boolean), ...current])].join(delimiter)
 }
 
 function findLatestMsvc(fs, env) {
@@ -99,9 +99,10 @@ function resolveWindowsBuildEnv({ env = process.env, fs = require('fs'), platfor
   }
 
   const nextEnv = { ...env }
-  nextEnv.PATH = prependEnvPath(env.PATH, [msvc.linkDir, sdk.binDir])
-  nextEnv.LIB = prependEnvPath(env.LIB, [msvc.libDir, sdk.ucrtLibDir, sdk.umLibDir])
-  nextEnv.INCLUDE = prependEnvPath(env.INCLUDE, sdk.includeDirs)
+  const delimiter = platform === 'win32' ? ';' : path.delimiter
+  nextEnv.PATH = prependEnvPath(env.PATH, [msvc.linkDir, sdk.binDir], delimiter)
+  nextEnv.LIB = prependEnvPath(env.LIB, [msvc.libDir, sdk.ucrtLibDir, sdk.umLibDir], delimiter)
+  nextEnv.INCLUDE = prependEnvPath(env.INCLUDE, sdk.includeDirs, delimiter)
 
   return {
     ok: true,
