@@ -5,7 +5,9 @@
 
 **Excalidraw as a native desktop app.** Same infinite canvas, hand-drawn style, and library you love — now with proper file associations, native menus, OS theme integration, and real file paths. Works offline. Feels like a first-class citizen on your operating system.
 
-![ExcalidrawX screenshots](./assets/excalidrawx-screenshot.png)
+| Mac | Windows |
+|---|---|
+| ![ExcalidrawX screenshots](./assets/excalidrawx-screenshot-mac.png) | ![ExcalidrawX screenshots](./assets/excalidrawx-screenshot-win.png) |
 
 ---
 
